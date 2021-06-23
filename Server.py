@@ -1,15 +1,16 @@
 from bottle import run, request, post, get
 import json
 
+
 @get('/')
 def index():
-    list = []
-    out_file = open('/home/alex/IdeaProjects/untitled/myfile.json', 'w')
-    with open('/home/alex/IdeaProjects/untitled/Data', 'r') as f:
+    element = []
+    with open('/home/alex/IdeaProjects/Server_JSON/Eventi.json', 'r') as f:
         file = json.load(f)
-    for value in file['object']:
-        if value['Role'] == 'Editor':
-            list.append(json.dumps(value))
-    print(list)
+    #for value in file:
+        #if value['Role'] == 'Editor':
+        #element.append(json.dumps(value))
+    return json.dumps(file)
 
-run(host = 'localhost', port = 8080, debug = True)
+
+run(host='0.0.0.0', port=12345, debug=True)
