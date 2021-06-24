@@ -1,19 +1,75 @@
-from bottle import run, request, post, get
+from bottle import run, request, post, get, put
 import pymongo
 from bson import json_util
 
+# Connection to MongoDB
+myclient = pymongo.MongoClient("mongodb://localhost:27017/")
+mydb = myclient["CalendarDB"]
+Cal = mydb["Calendar"]
+Event = mydb["Events"]
 
+#shows all events
 @get('/')
 def index():
-    # Connection to MongoDB
-    myclient = pymongo.MongoClient("mongodb://localhost:27017/")
-    mydb = myclient["CalendarDB"]
-    Cal = mydb["Calendar"]
-    Event = mydb["Events"]
-    items = Cal.find({}, {'_id': 0, 'Events': 1})
+    item = Event.find()
+    return json_util.dumps(item)
+
+#shows all events given calendar
+@post('/list_cal_event')
+def list_event():
+    items_ev = []
+    type = request.params.get('type')
+    items = Cal.find({'Type': type}, {'Events': 1})
     res = items[0]['Events']
-    items_ev = Event.find({'_id': res}, {'Title': 1, 'Start': 1, 'End': 1})
+
+    for x in res:
+        items_ev.append(Event.find({'ID': x}, {'Title'}))
     return json_util.dumps(items_ev)
+
+#modify a given event title
+@post('/mod_title')
+def update_title_events():
+    id_event = request.params.get('id')
+    title = request.params.get('title')
+    myquery = {"ID": id_event}
+    newvalues = {"$set": {"Title": title}}
+    Event.update_one(myquery, newvalues)
+    item = Event.find()
+    return json_util.dumps(item)
+
+#delete a specific event
+@post('/delete_event')
+def delete_event():
+    id_event = request.params.get('id')
+    myquery = {"ID": id_event}
+    Event.delete_one(myquery)
+    item = Event.find()
+    return json_util.dumps(item)
+
+#get a specific event given event title
+@post('/title_event')
+def vis_event_title():
+    title = request.params.get('title')
+    myquery = {"Title": title}
+    item = Event.find(myquery, {'Title', 'ID'})
+    return json_util.dumps(item)
+
+#insert new event
+#curl --data "id=5&title=Lezione Fisica&start=2021-11-10T13:45:00.000Z&end=2021-11-10T13:45:00.000Z&calendar=School" http://0.0.0.0:12345/insert_event
+@post('/insert_event')
+def insert_event():
+    id = request.params.get('id')
+    title = request.params.get('title')
+    start = request.params.get('start')
+    end = request.params.get('end')
+    calendar = request.params.get('calendar')
+    myquery = {'ID': id, 'Title': title, 'Start': start, 'End': end}
+    Event.insert_one(myquery)
+    myquery2 = {"Type": calendar}
+    newvalues = {"$addToSet": {'Events': id}}
+    Cal.update_one(myquery2, newvalues)
+    item = Event.find()
+    return json_util.dumps(item)
 
 
 run(host='0.0.0.0', port=12345, debug=True)
