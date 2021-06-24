@@ -46,26 +46,27 @@ def delete_event():
     item = Event.find()
     return json_util.dumps(item)
 
-#get a specific event given event title
-@post('/title_event')
+#get events given event type
+@post('/type_event')
 def vis_event_title():
-    title = request.params.get('title')
-    myquery = {"Title": title}
+    type = request.params.get('type')
+    myquery = {"Type": type}
     item = Event.find(myquery, {'Title', 'ID'})
     return json_util.dumps(item)
 
 #insert new event
-#curl --data "id=5&title=Lezione Fisica&start=2021-11-10T13:45:00.000Z&end=2021-11-10T13:45:00.000Z&calendar=School" http://0.0.0.0:12345/insert_event
+#curl --data "id=6&title=Cena Fisic&type=Cena&start=2021-11-10T13:45:00.000Z&end=2021-11-10T13:45:00.000Z&calendar=School" http://0.0.0.0:12345/insert_event
 @post('/insert_event')
 def insert_event():
     id = request.params.get('id')
     title = request.params.get('title')
+    type = request.params.get('type')
     start = request.params.get('start')
     end = request.params.get('end')
     calendar = request.params.get('calendar')
-    myquery = {'ID': id, 'Title': title, 'Start': start, 'End': end}
+    myquery = {'ID': id, 'Title': title, 'Type': type, 'Start': start, 'End': end}
     Event.insert_one(myquery)
-    myquery2 = {"Type": calendar}
+    myquery2 = {'Type': calendar}
     newvalues = {"$addToSet": {'Events': id}}
     Cal.update_one(myquery2, newvalues)
     item = Event.find()
