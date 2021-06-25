@@ -1,4 +1,6 @@
-from bottle import run, request, post, get, put
+import datetime
+
+from bottle import run, request, post, get
 import pymongo
 from bson import json_util
 
@@ -11,8 +13,7 @@ Event = mydb["Events"]
 #shows all events
 @get('/')
 def index():
-    item = Event.find()
-    return json_util.dumps(item)
+    return json_util.dumps(Event.find())
 
 #shows all events given calendar
 @post('/list_cal_event')
@@ -21,7 +22,6 @@ def list_event():
     type = request.params.get('type')
     items = Cal.find({'Type': type}, {'Events': 1})
     res = items[0]['Events']
-
     for x in res:
         items_ev.append(Event.find({'ID': x}, {'Title'}))
     return json_util.dumps(items_ev)
@@ -41,8 +41,11 @@ def update_title_events():
 @post('/delete_event')
 def delete_event():
     id_event = request.params.get('id')
+    calendar = request.params.get('cal')
     myquery = {"ID": id_event}
     Event.delete_one(myquery)
+    query = {"Type": calendar}
+    Cal.update_one(query, {"$pull": {'Events': id_event}})
     item = Event.find()
     return json_util.dumps(item)
 
@@ -64,7 +67,9 @@ def insert_event():
     start = request.params.get('start')
     end = request.params.get('end')
     calendar = request.params.get('calendar')
-    myquery = {'ID': id, 'Title': title, 'Type': type, 'Start': start, 'End': end}
+    start_date = datetime.datetime.strptime(start, "%Y-%m-%dT%H:%M:%S.000Z")
+    end_date = datetime.datetime.strptime(end, "%Y-%m-%dT%H:%M:%S.000Z")
+    myquery = {'ID': id, 'Title': title, 'Type': type, 'Start': start_date, 'End': end_date}
     Event.insert_one(myquery)
     myquery2 = {'Type': calendar}
     newvalues = {"$addToSet": {'Events': id}}
