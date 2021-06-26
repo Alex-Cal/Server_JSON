@@ -1,4 +1,4 @@
-import datetime
+import datetime as dt
 import json
 import re
 
@@ -11,7 +11,7 @@ myclient = pymongo.MongoClient("mongodb://localhost:27017/")
 mydb = myclient["CalendarDB"]
 Cal = mydb["Calendar"]
 Event = mydb["Events"]
-
+element_to_be_date = ["start", "end"]
 
 # shows all events
 @get('/')
@@ -66,14 +66,13 @@ def vis_event_title():
 
 
 def crate_query(list_param):
-    myQueryStr = "{"
+    query = {}
     for i in range(0, len(list_param)):
-        myQueryStr += "'" + list_param[i][0] + "'" + ": " + "'" + list_param[i][1] + "'"
-        if i == len(list_param) - 1:
-            continue
-        myQueryStr += ", "
-    myQueryStr += "}"
-    return myQueryStr
+        if any(list_param[i][0] in el for el in element_to_be_date):
+            query[list_param[i][0]] = dt.datetime.strptime(list_param[i][1], "%Y-%m-%dT%H:%M:%S.000Z")
+        else:
+            query[list_param[i][0]] = list_param[i][1]
+    return query
 
 
 def get_query(request):
@@ -101,21 +100,23 @@ def insert_event():
     query = get_query(request.body.read().decode('utf-8'))
     print(query)
 
-    # id = request.params.get('id')
-    # title = request.params.get('title')
+    #id = request.params.get('id')
+    #title = request.params.get('Title')
     # type = request.params.get('type')
     # start = request.params.get('start')
     # end = request.params.get('end')
     # calendar = request.params.get('calendar')
     # start_date = datetime.datetime.strptime(start, "%Y-%m-%dT%H:%M:%S.000Z")
     # end_date = datetime.datetime.strptime(end, "%Y-%m-%dT%H:%M:%S.000Z")
-    # myquery = {'ID': id, 'Title': title, 'Type': type, 'Start': start_date, 'End': end_date}
+    # myquery = {'id': id, 'Title': title}
+    #print(myquery)
 
 
-   # Event.insert_one(myquery)
-   # myquery2 = {'Type': calendar}
-   #  newvalues = {"$addToSet": {'Events': id}}
-   #  Cal.update_one(myquery2, newvalues)
-   #  item = Event.find()
+    Event.insert_one(query)
+    #myquery2 = {'Type': calendar}
+    #newvalues = {"$addToSet": {'Events': id}}
+    #Cal.update_one(myquery2, newvalues)
+    #item = Event.find()
+
 
 run(host='0.0.0.0', port=12345, debug=True)
