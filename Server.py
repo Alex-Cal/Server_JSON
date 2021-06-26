@@ -1,4 +1,6 @@
 import datetime
+import json
+import re
 
 from bottle import run, request, post, get
 import pymongo
@@ -10,12 +12,14 @@ mydb = myclient["CalendarDB"]
 Cal = mydb["Calendar"]
 Event = mydb["Events"]
 
-#shows all events
+
+# shows all events
 @get('/')
 def index():
     return json_util.dumps(Event.find())
 
-#shows all events given calendar
+
+# shows all events given calendar
 @post('/list_cal_event')
 def list_event():
     items_ev = []
@@ -26,7 +30,8 @@ def list_event():
         items_ev.append(Event.find({'ID': x}, {'Title'}))
     return json_util.dumps(items_ev)
 
-#modify a given event title
+
+# modify a given event title
 @post('/mod_title')
 def update_title_events():
     id_event = request.params.get('id')
@@ -37,7 +42,8 @@ def update_title_events():
     item = Event.find()
     return json_util.dumps(item)
 
-#delete a specific event
+
+# delete a specific event
 @post('/delete_event')
 def delete_event():
     id_event = request.params.get('id')
@@ -49,7 +55,8 @@ def delete_event():
     item = Event.find()
     return json_util.dumps(item)
 
-#get events given event type
+
+# get events given event type
 @post('/type_event')
 def vis_event_title():
     type = request.params.get('type')
@@ -57,25 +64,58 @@ def vis_event_title():
     item = Event.find(myquery, {'Title', 'ID'})
     return json_util.dumps(item)
 
-#insert new event
-#curl --data "id=6&title=Cena Fisic&type=Cena&start=2021-11-10T13:45:00.000Z&end=2021-11-10T13:45:00.000Z&calendar=School" http://0.0.0.0:12345/insert_event
+
+def crate_query(list_param):
+    myQueryStr = "{"
+    for i in range(0, len(list_param)):
+        myQueryStr += "'" + list_param[i][0] + "'" + ": " + "'" + list_param[i][1] + "'"
+        if i == len(list_param) - 1:
+            continue
+        myQueryStr += ", "
+    myQueryStr += "}"
+    return myQueryStr
+
+
+def get_query(request):
+    pair = []
+    equal_list = []
+    dollar_list = []
+    for item in re.finditer('&', request):
+        dollar_list.append(item.start())
+
+    for item in re.finditer('=', request):
+        equal_list.append(item.start())
+
+    pair.append(((request[0:equal_list[0]]), request[equal_list[0] + 1:dollar_list[0]]))
+    for i in range(0, len(dollar_list) - 1):
+        pair.append((request[dollar_list[i] + 1:equal_list[i + 1]], request[equal_list[i + 1] + 1:dollar_list[i + 1]]))
+    pair.append((request[dollar_list[len(dollar_list) - 1] + 1:equal_list[len(dollar_list)]],
+                 request[equal_list[len(dollar_list)] + 1:len(request)]))
+    return crate_query(pair)
+
+
+# insert new event
+# curl --data "id=6&title=Cena Fisic&type=Cena&start=2021-11-10T13:45:00.000Z&end=2021-11-10T13:45:00.000Z&calendar=School" http://0.0.0.0:12345/insert_event
 @post('/insert_event')
 def insert_event():
-    id = request.params.get('id')
-    title = request.params.get('title')
-    type = request.params.get('type')
-    start = request.params.get('start')
-    end = request.params.get('end')
-    calendar = request.params.get('calendar')
-    start_date = datetime.datetime.strptime(start, "%Y-%m-%dT%H:%M:%S.000Z")
-    end_date = datetime.datetime.strptime(end, "%Y-%m-%dT%H:%M:%S.000Z")
-    myquery = {'ID': id, 'Title': title, 'Type': type, 'Start': start_date, 'End': end_date}
-    Event.insert_one(myquery)
-    myquery2 = {'Type': calendar}
-    newvalues = {"$addToSet": {'Events': id}}
-    Cal.update_one(myquery2, newvalues)
-    item = Event.find()
-    return json_util.dumps(item)
+    query = get_query(request.body.read().decode('utf-8'))
+    print(query)
 
+    # id = request.params.get('id')
+    # title = request.params.get('title')
+    # type = request.params.get('type')
+    # start = request.params.get('start')
+    # end = request.params.get('end')
+    # calendar = request.params.get('calendar')
+    # start_date = datetime.datetime.strptime(start, "%Y-%m-%dT%H:%M:%S.000Z")
+    # end_date = datetime.datetime.strptime(end, "%Y-%m-%dT%H:%M:%S.000Z")
+    # myquery = {'ID': id, 'Title': title, 'Type': type, 'Start': start_date, 'End': end_date}
+
+
+   # Event.insert_one(myquery)
+   # myquery2 = {'Type': calendar}
+   #  newvalues = {"$addToSet": {'Events': id}}
+   #  Cal.update_one(myquery2, newvalues)
+   #  item = Event.find()
 
 run(host='0.0.0.0', port=12345, debug=True)
