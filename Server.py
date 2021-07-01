@@ -114,12 +114,10 @@ def get_query(request):
 
 
 # insert new event
-# curl --data "id=6&title=Cena Fisic&type=Cena&start=2021-11-10T13:45:00.000Z&end=2021-11-10T13:45:00.000Z&calendar=School" http://0.0.0.0:12345/insert_event
+# curl --data "id=6&title=Cena Fisic&type=Cena&start=1627819982&end=1627823582&calendar=School" http://0.0.0.0:12345/insert_event
 @post('/insert_event')
 def insert_event():
     query = get_query(request.body.read().decode('utf-8'))
-    print(query)
-
     #id = request.params.get('id')
     #title = request.params.get('Title')
     # type = request.params.get('type')
@@ -133,10 +131,9 @@ def insert_event():
 
 
     Event.insert_one(query)
-    #myquery2 = {'Type': calendar}
-    #newvalues = {"$addToSet": {'Events': id}}
-    #Cal.update_one(myquery2, newvalues)
-    #item = Event.find()
+    myquery2 = {'Type': query['calendar']}
+    newvalues = {"$addToSet": {'Events': query['id']}}
+    Cal.update_one(myquery2, newvalues)
 
 
 run(host='192.168.188.80', port=12345, debug=True)
