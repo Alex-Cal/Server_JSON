@@ -11,7 +11,6 @@ myclient = pymongo.MongoClient("mongodb://localhost:27017/")
 mydb = myclient["CalendarDB"]
 Cal = mydb["Calendar"]
 Event = mydb["Events"]
-element_to_be_date = ["start", "end"]
 
 # shows all events
 @get('/')
@@ -27,7 +26,7 @@ def list_event():
     items = Cal.find({'Type': type}, {'Events': 1})
     res = items[0]['Events']
     for x in res:
-        items_ev.append(Event.find({'ID': x}, {'Title'}))
+        items_ev.append(Event.find({'id': x}, {'title'}))
     return json_util.dumps(items_ev)
 
 
@@ -68,10 +67,7 @@ def vis_event_title():
 def crate_query(list_param):
     query = {}
     for i in range(0, len(list_param)):
-        if any(list_param[i][0] in el for el in element_to_be_date):
-            query[list_param[i][0]] = dt.datetime.strptime(list_param[i][1], "%Y-%m-%dT%H:%M:%S.000Z")
-        else:
-            query[list_param[i][0]] = list_param[i][1]
+        query[list_param[i][0]] = list_param[i][1]
     return query
 
 
