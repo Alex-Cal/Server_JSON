@@ -2,12 +2,14 @@
   "_id": "60d48c6a9248c5c0c2432c10",
   "Type": "Work",
   "Owner": "Alex",
-  "Events": []
+  "Events": [
+    "2"
+  ]
 },{
   "_id": "60d48ca39248c5c0c2432c11",
   "Type": "School",
   "Owner": "Alex",
   "Events": [
-    "6"
+    "1"
   ]
 }]

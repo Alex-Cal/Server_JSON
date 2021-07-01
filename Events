@@ -1,14 +1,21 @@
 [{
   "_id": {
-    "$oid": "60d5a7249bb472ce40b821ba"
+    "$oid": "60ddb24875851de17b31827d"
   },
-  "ID": "6",
-  "Title": "Cena Fisic",
-  "Type": "Cena",
-  "Start": {
-    "$date": "2021-11-10T13:45:00Z"
+  "id": "1",
+  "title": "Cena Fisic",
+  "type": "Cena",
+  "start": "1627819982",
+  "end": "1627823582",
+  "calendar": "School"
+},{
+  "_id": {
+    "$oid": "60ddb2af75851de17b31827e"
   },
-  "End": {
-    "$date": "2021-11-10T13:45:00Z"
-  }
+  "id": "2",
+  "title": "AppProgetto",
+  "type": "Meeting",
+  "start": "1627834382",
+  "end": "1627841582",
+  "calendar": "Work"
 }]
