@@ -17,6 +17,11 @@ Event = mydb["Events"]
 def index():
     return json_util.dumps(Event.find())
 
+#shows all calendar
+@get('/cal')
+def calendar():
+    return json_util.dumps(Cal.find())
+
 def get_all_types(request):
     commas = []
     types = []
@@ -54,14 +59,11 @@ def list_event():
             items_ev.append(Event.find({'id': y}, {'title', 'start', 'end'}))
     for i in items_ev:
         s.append(str(json_util.dumps(i)))
-    print(s)
-    for z in s:
-        a.append(((z.replace('[', '')).replace(']', '')))
-    print(a)
-    return a
+    print (s)
+    return (str(s).replace("'[", '')).replace("]'", '')
 
 #list one type event
-@post('/list_cal_event')
+@get('/list_cal_event')
 def list_one_type_event():
     items_ev = []
     type = request.params.get('type')
