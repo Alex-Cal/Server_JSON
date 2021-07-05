@@ -17,41 +17,46 @@ Event = mydb["Events"]
 def index():
     return json_util.dumps(Event.find())
 
-#shows all calendar
-@get('/cal')
-def calendar():
-    return json_util.dumps(Cal.find())
-
 def get_all_types(request):
     commas = []
     types = []
     for item in re.finditer(',', request):
         commas.append(item.start())
-    
+
     types.append(request[0:commas[0]])
-    #add check if - greater than 1 
+    #add check if - greater than 1
     for i in range(0, len(commas)-1):
         types.append(request[commas[i]+1: commas[i+1]])
     types.append(request[commas[len(commas)-1]+1:len(request)])
     return types
 
 # shows all events given calendar
-@get('/list_cal_event')
+@post('/list_cal_event')
 def list_event():
     items_ev = []
+    res = []
+    s = []
+    a = []
     temp_type = request.params.get('type')
-    
+
     type = get_all_types(temp_type)
     print(type)
     #Now, type is a list of this form: ['Scuola', 'Work'], so you must make multiple queries (or a single query with an OR operator)
 
-    items = Cal.find({'Type': type}, {'Events': 1})
-    res = items[0]['Events']
+    for i in type:
+        items = Cal.find({'Type': i}, {'Events': 1})
+        res.append(items[0]['Events'])
     for x in res:
-        items_ev.append(Event.find({'id': x}, {'title', 'start', 'end'}))
-    s = (str) (json_util.dumps(items_ev))
-    a = ((s.replace('[', '')).replace(']', ''))
-    return "[" + a + "]"
+        for y in x:
+            items_ev.append(Event.find({'id': y}, {'title'}))
+    #print(json_util.dumps(items_ev))
+    for i in items_ev:
+        s.append(str(json_util.dumps(i)))
+    print(s)
+    for z in s:
+        a.append(((z.replace('[', '')).replace(']', '')))
+    print(a)
+    return a
 
 
 # modify a given event title
@@ -88,7 +93,7 @@ def vis_event_title():
     return json_util.dumps(item)
 
 
-def create_query(list_param):
+def crate_query(list_param):
     query = {}
     for i in range(0, len(list_param)):
         query[list_param[i][0]] = list_param[i][1]
@@ -110,7 +115,7 @@ def get_query(request):
         pair.append((request[dollar_list[i] + 1:equal_list[i + 1]], request[equal_list[i + 1] + 1:dollar_list[i + 1]]))
     pair.append((request[dollar_list[len(dollar_list) - 1] + 1:equal_list[len(dollar_list)]],
                  request[equal_list[len(dollar_list)] + 1:len(request)]))
-    return create_query(pair)
+    return crate_query(pair)
 
 
 # insert new event
@@ -118,16 +123,6 @@ def get_query(request):
 @post('/insert_event')
 def insert_event():
     query = get_query(request.body.read().decode('utf-8'))
-    #id = request.params.get('id')
-    #title = request.params.get('Title')
-    # type = request.params.get('type')
-    # start = request.params.get('start')
-    # end = request.params.get('end')
-    # calendar = request.params.get('calendar')
-    # start_date = datetime.datetime.strptime(start, "%Y-%m-%dT%H:%M:%S.000Z")
-    # end_date = datetime.datetime.strptime(end, "%Y-%m-%dT%H:%M:%S.000Z")
-    # myquery = {'id': id, 'Title': title}
-    #print(myquery)
 
 
     Event.insert_one(query)
@@ -136,5 +131,4 @@ def insert_event():
     Cal.update_one(myquery2, newvalues)
 
 
-run(host='192.168.188.80', port=12345, debug=True)
-
+run(host='0.0.0.0', port=12345, debug=True)
