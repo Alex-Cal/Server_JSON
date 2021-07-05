@@ -72,17 +72,16 @@ def list_one_type_event():
     items = Cal.find({'Type': type}, {'Events': 1})
     res = items[0]['Events']
     for x in res:
-        items_ev.append(Event.find({'id': x}, {'title', 'start', 'end', 'color','allDay'}))
+        items_ev.append(Event.find({'id': x}, {'title', 'start', 'end', 'color', 'allDay'}))
     s = (str) (json_util.dumps(items_ev))
     a = ((s.replace('[', '')).replace(']', ''))
     return "[" + a + "]"
 # modify a given event title
 @post('/mod_title')
 def update_title_events():
-    id_event = request.params.get('id')
-    title = request.params.get('title')
-    myquery = {"ID": id_event}
-    newvalues = {"$set": {"Title": title}}
+    query = get_query(request.body.read().decode('utf-8'))
+    myquery = {"id": query['id']}
+    newvalues = {"$set": {"title": query['title']}}
     Event.update_one(myquery, newvalues)
     item = Event.find()
     return json_util.dumps(item)
@@ -91,12 +90,11 @@ def update_title_events():
 # delete a specific event
 @post('/delete_event')
 def delete_event():
-    id_event = request.params.get('id')
-    calendar = request.params.get('cal')
-    myquery = {"ID": id_event}
+    query = get_query(request.body.read().decode('utf-8'))
+    myquery = {"id": query['id']}
     Event.delete_one(myquery)
-    query = {"Type": calendar}
-    Cal.update_one(query, {"$pull": {'Events': id_event}})
+    new_query = {"Type": query['calendar']}
+    Cal.update_one(new_query, {"$pull": {'Events': query['id']}})
     item = Event.find()
     return json_util.dumps(item)
 
@@ -131,8 +129,6 @@ def get_query(request):
 @post('/insert_event')
 def insert_event():
     query = get_query(request.body.read().decode('utf-8'))
-
-
     Event.insert_one(query)
     myquery2 = {'Type': query['calendar']}
     newvalues = {"$addToSet": {'Events': query['id']}}
