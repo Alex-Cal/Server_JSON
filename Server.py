@@ -23,6 +23,8 @@ def get_all_types(request):
     for item in re.finditer(',', request):
         commas.append(item.start())
 
+    if len(commas) == 0:
+        return request
     types.append(request[0:commas[0]])
     #add check if - greater than 1
     for i in range(0, len(commas)-1):
@@ -31,7 +33,7 @@ def get_all_types(request):
     return types
 
 # shows all events given calendar
-@post('/list_cal_event')
+@post('/list_cal_event_multiple')
 def list_event():
     items_ev = []
     res = []
@@ -45,11 +47,11 @@ def list_event():
 
     for i in type:
         items = Cal.find({'Type': i}, {'Events': 1})
+        print(i)
         res.append(items[0]['Events'])
     for x in res:
         for y in x:
-            items_ev.append(Event.find({'id': y}, {'title'}))
-    #print(json_util.dumps(items_ev))
+            items_ev.append(Event.find({'id': y}, {'title', 'start', 'end'}))
     for i in items_ev:
         s.append(str(json_util.dumps(i)))
     print(s)
@@ -58,7 +60,18 @@ def list_event():
     print(a)
     return a
 
-
+#list one type event
+@post('/list_cal_event')
+def list_one_type_event():
+    items_ev = []
+    type = request.params.get('type')
+    items = Cal.find({'Type': type}, {'Events': 1})
+    res = items[0]['Events']
+    for x in res:
+        items_ev.append(Event.find({'id': x}, {'title', 'start', 'end'}))
+    s = (str) (json_util.dumps(items_ev))
+    a = ((s.replace('[', '')).replace(']', ''))
+    return "[" + a + "]"
 # modify a given event title
 @post('/mod_title')
 def update_title_events():
