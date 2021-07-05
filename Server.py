@@ -33,7 +33,7 @@ def get_all_types(request):
     return types
 
 # shows all events given calendar
-@post('/list_cal_event_multiple')
+@get('/list_cal_event_multiple')
 def list_event():
     items_ev = []
     res = []
