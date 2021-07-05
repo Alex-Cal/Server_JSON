@@ -1,21 +1,49 @@
 [{
   "_id": {
-    "$oid": "60ddb24875851de17b31827d"
+    "$oid": "60e2d99efb924832684f2e00"
   },
   "id": "1",
-  "title": "Cena Fisic",
-  "type": "Cena",
+  "title": "LezioneFisica",
+  "type": "Lezione",
   "start": "1627819982",
   "end": "1627823582",
+  "color": "#ff0000",
+  "allDay": "true",
   "calendar": "School"
 },{
   "_id": {
-    "$oid": "60ddb2af75851de17b31827e"
+    "$oid": "60e2da08fb924832684f2e01"
   },
   "id": "2",
-  "title": "AppProgetto",
+  "title": "LezioneMatematica",
+  "type": "Lezione",
+  "start": "1627819982",
+  "end": "1627823582",
+  "color": "#fff000",
+  "allDay": "true",
+  "calendar": "School"
+},{
+  "_id": {
+    "$oid": "60e2da7cfb924832684f2e02"
+  },
+  "id": "3",
+  "title": "MeetingApp",
   "type": "Meeting",
-  "start": "1627834382",
-  "end": "1627841582",
+  "start": "1627819982",
+  "end": "1627823582",
+  "color": "#0000ff",
+  "allDay": "false",
+  "calendar": "Work"
+},{
+  "_id": {
+    "$oid": "60e2da9dfb924832684f2e03"
+  },
+  "id": "4",
+  "title": "MeetingApp2",
+  "type": "Meeting",
+  "start": "1627819982",
+  "end": "1627823582",
+  "color": "#00ff00",
+  "allDay": "false",
   "calendar": "Work"
 }]
