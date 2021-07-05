@@ -32,7 +32,7 @@ def get_all_types(request):
     #add check if - greater than 1 
     for i in range(0, len(commas)-1):
         types.append(request[commas[i]+1: commas[i+1]])
-    types.append(request[commas[len(commas)-1]:len(request)])
+    types.append(request[commas[len(commas)-1]+1:len(request)])
     return types
 
 # shows all events given calendar
