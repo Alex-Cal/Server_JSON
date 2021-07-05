@@ -22,6 +22,7 @@ def index():
 def calendar():
     return json_util.dumps(Cal.find())
 
+
 def get_all_types(request):
     commas = []
     types = []
@@ -36,6 +37,7 @@ def get_all_types(request):
         types.append(request[commas[i]+1: commas[i+1]])
     types.append(request[commas[len(commas)-1]+1:len(request)])
     return types
+
 
 # shows all events given calendar
 @get('/list_cal_event_multiple')
@@ -56,7 +58,7 @@ def list_event():
         res.append(items[0]['Events'])
     for x in res:
         for y in x:
-            items_ev.append(Event.find({'id': y}, {'title', 'start', 'end'}))
+            items_ev.append(Event.find({'id': y}, {'title', 'start', 'end', 'color', 'allDay'}))
     for i in items_ev:
         s.append(str(json_util.dumps(i)))
     print (s)
@@ -70,7 +72,7 @@ def list_one_type_event():
     items = Cal.find({'Type': type}, {'Events': 1})
     res = items[0]['Events']
     for x in res:
-        items_ev.append(Event.find({'id': x}, {'title', 'start', 'end'}))
+        items_ev.append(Event.find({'id': x}, {'title', 'start', 'end', 'color','allDay'}))
     s = (str) (json_util.dumps(items_ev))
     a = ((s.replace('[', '')).replace(']', ''))
     return "[" + a + "]"
@@ -99,15 +101,6 @@ def delete_event():
     return json_util.dumps(item)
 
 
-# get events given event type
-@post('/type_event')
-def vis_event_title():
-    type = request.params.get('type')
-    myquery = {"Type": type}
-    item = Event.find(myquery, {'Title', 'ID'})
-    return json_util.dumps(item)
-
-
 def crate_query(list_param):
     query = {}
     for i in range(0, len(list_param)):
@@ -133,8 +126,8 @@ def get_query(request):
     return crate_query(pair)
 
 
-# insert new event
-# curl --data "id=6&title=Cena Fisic&type=Cena&start=1627819982&end=1627823582&calendar=School" http://0.0.0.0:12345/insert_event
+# insert new event curl --data "id=6&title=Cena Fisic&type=Cena&start=1627819982&end=1627823582&calendar=School"
+# http://0.0.0.0:12345/insert_event
 @post('/insert_event')
 def insert_event():
     query = get_query(request.body.read().decode('utf-8'))
