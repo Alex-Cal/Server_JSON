@@ -109,7 +109,7 @@ def delete_event():
     return json_util.dumps(item)
 
 
-def crate_query(list_param):
+def create_query(list_param):
     query = {}
     for i in range(0, len(list_param)):
         query[list_param[i][0]] = list_param[i][1]
@@ -126,12 +126,14 @@ def get_query(request):
     for item in re.finditer('=', request):
         equal_list.append(item.start())
 
+    if len(dollar_list) == 0:
+        pair.append(((request[0:equal_list[0]]), request[equal_list[0] + 1:len(request)]))
+        return create_query(pair)
     pair.append(((request[0:equal_list[0]]), request[equal_list[0] + 1:dollar_list[0]]))
     for i in range(0, len(dollar_list) - 1):
         pair.append((request[dollar_list[i] + 1:equal_list[i + 1]], request[equal_list[i + 1] + 1:dollar_list[i + 1]]))
-    pair.append((request[dollar_list[len(dollar_list) - 1] + 1:equal_list[len(dollar_list)]],
-                 request[equal_list[len(dollar_list)] + 1:len(request)]))
-    return crate_query(pair)
+    pair.append((request[dollar_list[len(dollar_list) - 1] + 1:equal_list[len(dollar_list)]], request[equal_list[len(dollar_list)] + 1:len(request)]))
+    return create_query(pair)
 
 
 # insert new event curl --data "id=6&title=Cena Fisic&type=Cena&start=1627819982&end=1627823582&calendar=School"
@@ -143,6 +145,29 @@ def insert_event():
     myquery = {'Type': query['calendar']}
     newvalues = {"$addToSet": {'Events': query['id']}}
     Cal.update_one(myquery, newvalues)
+
+@post('/insert_cal')
+def insert_cal():
+    query = get_query(request.body.read().decode('utf-8'))
+    query2 = {"Events": [], "Precondition": []}
+    new_dict = {**query, **query2}
+    Cal.insert_one(new_dict)
+
+@post('/insert_user')
+def insert_user():
+    query = get_query(request.body.read().decode('utf-8'))
+    print(query)
+    query2 = {"Group": [], "Precondition": []}
+    new_dict = {**query, **query2}
+    User.insert_one(new_dict)
+
+@post('/insert_group')
+def insert_group():
+    query = get_query(request.body.read().decode('utf-8'))
+    print(query)
+    query2 = {"User": [], "Precondition": []}
+    new_dict = {**query, **query2}
+    Group.insert_one(new_dict)
 
 
 @post('/precondition')
