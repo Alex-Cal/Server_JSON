@@ -173,12 +173,38 @@ def string_repetition(timeslot):
 
 
 def string_not_repetition(timeslot):
-    pass
+    minus_position = 0
+    for item in re.finditer('-', timeslot):
+        minus_position = item.start()
+    start_date = timeslot[0:minus_position]
+    end_date = timeslot[minus_position+1:len(timeslot)]
+    start_date_pre = datetime.fromtimestamp(int(start_date))
+    end_date_pre = datetime.fromtimestamp(int(end_date))
+
+    start_date_param = datetime.date(start_date_pre)
+    end_date_param = datetime.date(end_date_pre)
+    start_hour_param = datetime.time(start_date_pre)
+    end_hour_param = datetime.time(end_date_pre)
+    return [start_date_param, start_hour_param, end_date_param, end_hour_param]
+
+def evaluate_not_rep(timeslot, calendar):
+    [start_date, start_hour, end_date, end_hour] = string_not_repetition(timeslot)
+    result = Event.find({"calendar": calendar}, {"_id": 1, "start": 1, "end": 1})
+    good_event = []
+    for item in result:
+        start = datetime.fromtimestamp(int(item["start"]))
+        end = datetime.fromtimestamp(int(item["end"]))
+        if datetime.date(end) < start_date or datetime.date(start) > end_date:
+            good_event.append(item)
+        else:
+            if datetime.time(end) < start_hour or datetime.time(start) > end_hour:
+                good_event.append(item)
+    return good_event
 
 
-def evaluate_rep(timeslot):
+def evaluate_rep(timeslot, calendar):
     [start_day, start_hour, end_day, end_hour] = string_repetition(timeslot)
-    result = Event.find({}, {"_id": 1, "start": 1, "end": 1})
+    result = Event.find({"calendar": calendar}, {"_id": 1, "start": 1, "end": 1})
     good_event = []
     for item in result:
         start = datetime.fromtimestamp(int(item["start"]))
@@ -189,29 +215,25 @@ def evaluate_rep(timeslot):
             good_event.append(item)
         else:
             if datetime.time(end) < start_hour_pre or datetime.time(start) > end_hour_pre:
+                print("ciao")
                 good_event.append(item)
     return good_event
-
-
-
-
 
 
 @post("/event_vis")
 def vis():
     query = get_query(request.body.read().decode('utf-8'))
+    res = []
     if (User.find_one({"Name": query['name']})) is None:
         result = Group.find_one({"Name": query['name']}, {"Precondition": 1, "_id": 0})
         for i in result['Precondition']:
             timeslot = Precondition.find({"id": i, "calendar": query['calendar']},
                                          {"timeslot": 1, "_id": 0, "type_time": 1})
             if timeslot[0]["type_time"] == "repetition":
-                res = evaluate_rep(timeslot[0]['timeslot'])
-                return res
+                res = evaluate_rep(timeslot[0]['timeslot'], query['calendar'])
+
             else:
-                string_not_repetition(timeslot[0]['timeslot'])
-                #res = evaluate_not_rep()
-                #return res
+                res = evaluate_not_rep(timeslot[0]['timeslot'], query['calendar'])
 
     else:
         result = User.find_one({"Name": query['name']}, {"Precondition": 1, "_id": 0})
@@ -219,10 +241,11 @@ def vis():
             timeslot = Precondition.find({"id": i, "calendar": query['calendar']},
                                          {"timeslot": 1, "_id": 0, "type_time": 1})
             if timeslot[0]["type_time"] == "repetition":
-                string_repetition(timeslot[0]['timeslot'])
-
+                res = evaluate_rep(timeslot[0]['timeslot'], query['calendar'])
             else:
-                string_not_repetition(timeslot[0]['timeslot'])
+                res = evaluate_not_rep(timeslot[0]['timeslot'], query['calendar'])
+
+    return json_util.dumps(res)
 
 
 run(host='0.0.0.0', port=12345, debug=True)
