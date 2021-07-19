@@ -133,7 +133,8 @@ def get_query(request):
     pair.append(((request[0:equal_list[0]]), request[equal_list[0] + 1:dollar_list[0]]))
     for i in range(0, len(dollar_list) - 1):
         pair.append((request[dollar_list[i] + 1:equal_list[i + 1]], request[equal_list[i + 1] + 1:dollar_list[i + 1]]))
-    pair.append((request[dollar_list[len(dollar_list) - 1] + 1:equal_list[len(dollar_list)]], request[equal_list[len(dollar_list)] + 1:len(request)]))
+    pair.append((request[dollar_list[len(dollar_list) - 1] + 1:equal_list[len(dollar_list)]],
+                 request[equal_list[len(dollar_list)] + 1:len(request)]))
     return create_query(pair)
 
 
@@ -147,12 +148,14 @@ def insert_event():
     newvalues = {"$addToSet": {'Events': query['id']}}
     Cal.update_one(myquery, newvalues)
 
+
 @post('/insert_cal')
 def insert_cal():
     query = get_query(request.body.read().decode('utf-8'))
     query2 = {"Events": [], "Precondition": [], "Admin_auth": []}
     new_dict = {**query, **query2}
     Cal.insert_one(new_dict)
+
 
 @post('/insert_user')
 def insert_user():
@@ -162,6 +165,7 @@ def insert_user():
     new_dict = {**query, **query2}
     User.insert_one(new_dict)
 
+
 @post('/insert_group')
 def insert_group():
     query = get_query(request.body.read().decode('utf-8'))
@@ -170,10 +174,28 @@ def insert_group():
     new_dict = {**query, **query2}
     Group.insert_one(new_dict)
 
+
 @post("/list_us")
 def list_us():
     res = User.find({}, {"Name": 1, "_id": 0, "Surname": 1})
     return json_util.dumps(res)
+
+
+# curl --data "id=1&subject=Carol&calendar=School&type_event=Lezione&prop=null&type_auth=read&sign=+" http://0.0.0.0:12345/ins_auth
+@post("/ins_auth")
+def insert_auth():
+    query = get_query(request.body.read().decode('utf-8'))
+    myquery = {'Type': query['calendar']}
+    newvalues = {"$addToSet": {'Authorization': query['id']}}
+    myquery2 = {'Name': query['subject']}
+    if User.find_one(myquery2) is None:
+        Auth.insert_one(query)
+        Group.update_one(myquery2, newvalues)
+        Cal.update_one(myquery, newvalues)
+    else:
+        Auth.insert_one(query)
+        User.update_one(myquery2, newvalues)
+        Cal.update_one(myquery, newvalues)
 
 
 @post('/pre_admin')
@@ -196,6 +218,7 @@ def insert_precondition_or_admin_auth():
         else:
             User.update_one(myquery3, newvalues)
 
+
 def string_repetition(timeslot):
     minus_position = 0
     for item in re.finditer('-', timeslot):
@@ -212,7 +235,7 @@ def string_not_repetition(timeslot):
     for item in re.finditer('-', timeslot):
         minus_position = item.start()
     start_date = timeslot[0:minus_position]
-    end_date = timeslot[minus_position+1:len(timeslot)]
+    end_date = timeslot[minus_position + 1:len(timeslot)]
     start_date_pre = datetime.fromtimestamp(int(start_date))
     end_date_pre = datetime.fromtimestamp(int(end_date))
 
@@ -250,7 +273,8 @@ def evaluate_rep_admin(timeslot, calendar):
                 good_event.append(item)
     return good_event
 
-#-------------------------------------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------------------------------------
 def evaluate_not_rep(timeslot, calendar):
     [start_date, start_hour, end_date, end_hour] = string_not_repetition(timeslot)
     result = Event.find({"calendar": calendar}, {"_id": 1, "start": 1, "end": 1})
@@ -282,11 +306,12 @@ def evaluate_rep(timeslot, calendar):
                 good_event.append(item)
     return good_event
 
-#appenna accede, l'utente seleziona il calendario che vuole vedere e con un ulteriroe selezione sceglie se vedere le viste dei gruppi oppure delegato (se  ha il pemresso di esserlo)
-#dobbiamo capire se l'utente in questione, se non si tratta di un gruppo, se applicare la precondizione oppure la admin_uth
-#potrei avere entrambe, in relatà, ma quale visualizzazione avrà? Magari con un tastino avere la visualizzazione dleegate o non delegate
+
+# appenna accede, l'utente seleziona il calendario che vuole vedere e con un ulteriroe selezione sceglie se vedere le viste dei gruppi oppure delegato (se  ha il pemresso di esserlo)
+# dobbiamo capire se l'utente in questione, se non si tratta di un gruppo, se applicare la precondizione oppure la admin_uth
+# potrei avere entrambe, in relatà, ma quale visualizzazione avrà? Magari con un tastino avere la visualizzazione dleegate o non delegate
 # (oppure invece di not_delegate, faccio scegliere quale visualzizione rispetto  quale gruppo di appartenenza vuole avere)
-#per emplicità ci limitiamo ad un utente le cui viste sono associate ai gruppi ora vediamo se vogliamo quelle singole
+# per emplicità ci limitiamo ad un utente le cui viste sono associate ai gruppi ora vediamo se vogliamo quelle singole
 @post("/event_vis")
 def vis():
     query = get_query(request.body.read().decode('utf-8'))
@@ -306,7 +331,8 @@ def vis():
         if query['type'] == 'delegate':
             result = User.find_one({"Name": query['name']}, {"Admin_auth": 1, "_id": 0})
             for i in result['Admin_auth']:
-                timeslot = Admin_Auth.find({"id": i, "calendar": query['calendar']}, {"timeslot": 1, "_id": 0, "type_time": 1})
+                timeslot = Admin_Auth.find({"id": i, "calendar": query['calendar']},
+                                           {"timeslot": 1, "_id": 0, "type_time": 1})
                 if timeslot[0]["type_time"] == "repetition":
                     res = evaluate_rep_admin(timeslot[0]['timeslot'], query['calendar'])
                 else:
