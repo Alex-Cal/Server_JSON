@@ -13,6 +13,7 @@ mydb = myclient["CalendarDB"]
 Cal = mydb["Calendar"]
 Event = mydb["Events"]
 Precondition = mydb["Temporal Pre-Condition"]
+Admin_Auth = mydb["Admin_Auth"]
 Auth = mydb["Authorization"]
 User = mydb["User"]
 Group = mydb["Group"]
@@ -149,7 +150,7 @@ def insert_event():
 @post('/insert_cal')
 def insert_cal():
     query = get_query(request.body.read().decode('utf-8'))
-    query2 = {"Events": [], "Precondition": []}
+    query2 = {"Events": [], "Precondition": [], "Admin_auth": []}
     new_dict = {**query, **query2}
     Cal.insert_one(new_dict)
 
@@ -157,7 +158,7 @@ def insert_cal():
 def insert_user():
     query = get_query(request.body.read().decode('utf-8'))
     print(query)
-    query2 = {"Group": [], "Precondition": []}
+    query2 = {"Group": [], "Precondition": [], "Admin_auth": []}
     new_dict = {**query, **query2}
     User.insert_one(new_dict)
 
@@ -169,22 +170,31 @@ def insert_group():
     new_dict = {**query, **query2}
     Group.insert_one(new_dict)
 
+@post("/list_us")
+def list_us():
+    res = User.find({}, {"Name": 1, "_id": 0, "Surname": 1})
+    return json_util.dumps(res)
 
-@post('/precondition')
-def insert_precondition():
+
+@post('/pre_admin')
+def insert_precondition_or_admin_auth():
     query = get_query(request.body.read().decode('utf-8'))
-    Precondition.insert_one(query)
     myquery = {'Type': query['calendar']}
     newvalues = {"$addToSet": {'Precondition': query['id']}}
-    Cal.update_one(myquery, newvalues)
-    myquery2 = {'Name': query['name']}
-    newvalues2 = {"$addToSet": {'Precondition': query['id']}}
-    print(User.find_one({"Name": query['name']}))
-    if (User.find_one({"Name": query['name']})) is None:
-        Group.update_one(myquery2, newvalues2)
+    myquery2 = {'Type': query['calendar']}
+    newvalues2 = {"$addToSet": {'Admin_auth': query['id']}}
+    myquery3 = {'Name': query['name']}
+    if query['user_type'] == 'delegate':
+        Admin_Auth.insert_one(query)
+        Cal.update_one(myquery2, newvalues2)
+        User.update_one(myquery3, newvalues2)
     else:
-        User.update_one(myquery2, newvalues2)
-
+        Precondition.insert_one(query)
+        Cal.update_one(myquery, newvalues)
+        if (User.find_one(myquery3)) is None:
+            Group.update_one(myquery3, newvalues)
+        else:
+            User.update_one(myquery3, newvalues)
 
 def string_repetition(timeslot):
     minus_position = 0
@@ -212,6 +222,35 @@ def string_not_repetition(timeslot):
     end_hour_param = datetime.time(end_date_pre)
     return [start_date_param, start_hour_param, end_date_param, end_hour_param]
 
+
+def evaluate_not_rep_admin(timeslot, calendar):
+    [start_date, start_hour, end_date, end_hour] = string_not_repetition(timeslot)
+    result = Event.find({"calendar": calendar}, {"_id": 1, "start": 1, "end": 1})
+    good_event = []
+    for item in result:
+        start = datetime.fromtimestamp(int(item["start"]))
+        end = datetime.fromtimestamp(int(item["end"]))
+        if datetime.date(end) <= end_date and datetime.date(start) >= start_date:
+            if datetime.time(end) <= end_hour and datetime.time(start) >= start_hour:
+                good_event.append(item)
+    return good_event
+
+
+def evaluate_rep_admin(timeslot, calendar):
+    [start_day, start_hour, end_day, end_hour] = string_repetition(timeslot)
+    result = Event.find({"calendar": calendar}, {"_id": 1, "start": 1, "end": 1})
+    good_event = []
+    for item in result:
+        start = datetime.fromtimestamp(int(item["start"]))
+        end = datetime.fromtimestamp(int(item["end"]))
+        start_hour_adm = datetime.strptime(start_hour, "%H:%M").time()
+        end_hour_adm = datetime.strptime(end_hour, "%H:%M").time()
+        if int(datetime.weekday(start)) >= int(start_day) and int(datetime.weekday(end)) <= int(end_day):
+            if datetime.time(end) <= end_hour_adm and datetime.time(start) >= start_hour_adm:
+                good_event.append(item)
+    return good_event
+
+#-------------------------------------------------------------------------------------------------------
 def evaluate_not_rep(timeslot, calendar):
     [start_date, start_hour, end_date, end_hour] = string_not_repetition(timeslot)
     result = Event.find({"calendar": calendar}, {"_id": 1, "start": 1, "end": 1})
@@ -240,11 +279,14 @@ def evaluate_rep(timeslot, calendar):
             good_event.append(item)
         else:
             if datetime.time(end) < start_hour_pre or datetime.time(start) > end_hour_pre:
-                print("ciao")
                 good_event.append(item)
     return good_event
 
-
+#appenna accede, l'utente seleziona il calendario che vuole vedere e con un ulteriroe selezione sceglie se vedere le viste dei gruppi oppure delegato (se  ha il pemresso di esserlo)
+#dobbiamo capire se l'utente in questione, se non si tratta di un gruppo, se applicare la precondizione oppure la admin_uth
+#potrei avere entrambe, in relatà, ma quale visualizzazione avrà? Magari con un tastino avere la visualizzazione dleegate o non delegate
+# (oppure invece di not_delegate, faccio scegliere quale visualzizione rispetto  quale gruppo di appartenenza vuole avere)
+#per emplicità ci limitiamo ad un utente le cui viste sono associate ai gruppi ora vediamo se vogliamo quelle singole
 @post("/event_vis")
 def vis():
     query = get_query(request.body.read().decode('utf-8'))
@@ -261,14 +303,23 @@ def vis():
                 res = evaluate_not_rep(timeslot[0]['timeslot'], query['calendar'])
 
     else:
-        result = User.find_one({"Name": query['name']}, {"Precondition": 1, "_id": 0})
-        for i in result['Precondition']:
-            timeslot = Precondition.find({"id": i, "calendar": query['calendar']},
-                                         {"timeslot": 1, "_id": 0, "type_time": 1})
-            if timeslot[0]["type_time"] == "repetition":
-                res = evaluate_rep(timeslot[0]['timeslot'], query['calendar'])
-            else:
-                res = evaluate_not_rep(timeslot[0]['timeslot'], query['calendar'])
+        if query['type'] == 'delegate':
+            result = User.find_one({"Name": query['name']}, {"Admin_auth": 1, "_id": 0})
+            for i in result['Admin_auth']:
+                timeslot = Admin_Auth.find({"id": i, "calendar": query['calendar']}, {"timeslot": 1, "_id": 0, "type_time": 1})
+                if timeslot[0]["type_time"] == "repetition":
+                    res = evaluate_rep_admin(timeslot[0]['timeslot'], query['calendar'])
+                else:
+                    res = evaluate_not_rep_admin(timeslot[0]['timeslot'], query['calendar'])
+        else:
+            result = User.find_one({"Name": query['name']}, {"Precondition": 1, "_id": 0})
+            for i in result['Precondition']:
+                timeslot = Precondition.find({"id": i, "calendar": query['calendar']},
+                                             {"timeslot": 1, "_id": 0, "type_time": 1})
+                if timeslot[0]["type_time"] == "repetition":
+                    res = evaluate_rep(timeslot[0]['timeslot'], query['calendar'])
+                else:
+                    res = evaluate_not_rep(timeslot[0]['timeslot'], query['calendar'])
 
     return json_util.dumps(res)
 
