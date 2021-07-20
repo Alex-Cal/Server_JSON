@@ -277,32 +277,36 @@ def evaluate_rep_admin(timeslot, calendar):
 # -------------------------------------------------------------------------------------------------------
 def evaluate_not_rep(timeslot, calendar):
     [start_date, start_hour, end_date, end_hour] = string_not_repetition(timeslot)
-    result = Event.find({"calendar": calendar}, {"_id": 1, "start": 1, "end": 1})
+    result = Event.find({"calendar": calendar}, {"id": 1, "start": 1, "end": 1})
     good_event = []
     for item in result:
         start = datetime.fromtimestamp(int(item["start"]))
         end = datetime.fromtimestamp(int(item["end"]))
-        if datetime.date(end) < start_date or datetime.date(start) > end_date:
-            good_event.append(item)
-        else:
-            if datetime.time(end) < start_hour or datetime.time(start) > end_hour:
+        if datetime.date(start) >= start_date and datetime.date(end) <= end_date:
+            if (datetime.date(start) == start_date and datetime.time(end) < start_hour) or \
+                    (datetime.date(start) == end_date and datetime.time(start) > end_hour):
                 good_event.append(item)
+        else:
+            good_event.append(item)
     return good_event
 
 
 def evaluate_rep(timeslot, calendar):
     [start_day, start_hour, end_day, end_hour] = string_repetition(timeslot)
-    result = Event.find({"calendar": calendar}, {"_id": 1, "start": 1, "end": 1})
+    result = Event.find({"calendar": calendar}, {"id": 1, "start": 1, "end": 1})
     good_event = []
     for item in result:
         start = datetime.fromtimestamp(int(item["start"]))
         end = datetime.fromtimestamp(int(item["end"]))
         start_hour_pre = datetime.strptime(start_hour, "%H:%M").time()
         end_hour_pre = datetime.strptime(end_hour, "%H:%M").time()
-        if not (int(datetime.weekday(start)) == int(start_day) or int(datetime.weekday(end)) == int(end_day)):
-            good_event.append(item)
+        if int(datetime.weekday(start)) >= int(start_day) and int(datetime.weekday(end)) <= int(end_day):
+            if (int(datetime.weekday(start)) == int(start_day) and datetime.time(end) < start_hour_pre) or \
+                    (int(datetime.weekday(start)) == int(end_day) and datetime.time(start) > end_hour_pre):
+                good_event.append(item)
         else:
-            if datetime.time(end) < start_hour_pre or datetime.time(start) > end_hour_pre:
+            if (int(datetime.weekday(end)) > int(end_day) and datetime.time(start) > end_hour_pre) or \
+                    (int(datetime.weekday(start)) < int(start_day) and datetime.time(end) < start_hour_pre):
                 good_event.append(item)
     return good_event
 
