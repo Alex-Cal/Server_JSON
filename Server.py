@@ -253,8 +253,8 @@ def evaluate_not_rep_admin(timeslot, calendar):
     for item in result:
         start = datetime.fromtimestamp(int(item["start"]))
         end = datetime.fromtimestamp(int(item["end"]))
-        if datetime.date(end) <= end_date and datetime.date(start) >= start_date:
-            if datetime.time(end) <= end_hour and datetime.time(start) >= start_hour:
+        if not (datetime.date(start) > end_date or datetime.date(end) < start_date):
+            if not (datetime.time(start) > end_hour or datetime.time(end) < start_hour):
                 good_event.append(item)
     return good_event
 
@@ -268,8 +268,8 @@ def evaluate_rep_admin(timeslot, calendar):
         end = datetime.fromtimestamp(int(item["end"]))
         start_hour_adm = datetime.strptime(start_hour, "%H:%M").time()
         end_hour_adm = datetime.strptime(end_hour, "%H:%M").time()
-        if int(datetime.weekday(start)) >= int(start_day) and int(datetime.weekday(end)) <= int(end_day):
-            if datetime.time(end) <= end_hour_adm and datetime.time(start) >= start_hour_adm:
+        if not (int(datetime.weekday(start)) > int(end_day) or int(datetime.weekday(end)) < int(start_day)):
+            if not (datetime.time(start) > end_hour_adm or datetime.time(end) < start_hour_adm):
                 good_event.append(item)
     return good_event
 
@@ -282,11 +282,9 @@ def evaluate_not_rep(timeslot, calendar):
     for item in result:
         start = datetime.fromtimestamp(int(item["start"]))
         end = datetime.fromtimestamp(int(item["end"]))
-        if datetime.date(start) >= start_date and datetime.date(end) <= end_date:
-            if (datetime.date(start) == start_date and datetime.time(end) < start_hour) or \
-                    (datetime.date(start) == end_date and datetime.time(start) > end_hour):
-                good_event.append(item)
-        else:
+        if datetime.date(start) > end_date or datetime.date(end) < start_date:
+            good_event.append(item)
+        elif datetime.time(start) > end_hour or datetime.time(end) < start_hour:
             good_event.append(item)
     return good_event
 
@@ -300,18 +298,22 @@ def evaluate_rep(timeslot, calendar):
         end = datetime.fromtimestamp(int(item["end"]))
         start_hour_pre = datetime.strptime(start_hour, "%H:%M").time()
         end_hour_pre = datetime.strptime(end_hour, "%H:%M").time()
-        if int(datetime.weekday(start)) >= int(start_day) and int(datetime.weekday(end)) <= int(end_day):
-            if (int(datetime.weekday(start)) == int(start_day) and datetime.time(end) < start_hour_pre) or \
-                    (int(datetime.weekday(start)) == int(end_day) and datetime.time(start) > end_hour_pre):
-                good_event.append(item)
-        else:
-            if (int(datetime.weekday(end)) > int(end_day) and datetime.time(start) > end_hour_pre) or \
-                    (int(datetime.weekday(start)) < int(start_day) and datetime.time(end) < start_hour_pre):
-                good_event.append(item)
+
+        if int(datetime.weekday(start)) > int(end_day) or int(datetime.weekday(end)) < int(start_day):
+            good_event.append(item)
+        elif datetime.time(start) > end_hour_pre or datetime.time(end) < start_hour_pre:
+            good_event.append(item)
     return good_event
 
+def manage_conflict_auth(autorizzazioni):
+    auth = []
+    print(autorizzazioni)
+    for i in autorizzazioni:
+        auth.append((i['_id'], i['segno']))
+    print(auth)
 
-# appenna accede, l'utente seleziona il calendario che vuole vedere e con un ulteriroe selezione sceglie se vedere le viste dei gruppi oppure delegato (se  ha il pemresso di esserlo)
+
+# appena accede, l'utente seleziona il calendario che vuole vedere e con un ulteriroe selezione sceglie se vedere le viste dei gruppi oppure delegato (se  ha il pemresso di esserlo)
 # dobbiamo capire se l'utente in questione, se non si tratta di un gruppo, se applicare la precondizione oppure la admin_uth
 # potrei avere entrambe, in relatà, ma quale visualizzazione avrà? Magari con un tastino avere la visualizzazione dleegate o non delegate
 # (oppure invece di not_delegate, faccio scegliere quale visualzizione rispetto  quale gruppo di appartenenza vuole avere)
@@ -320,36 +322,52 @@ def evaluate_rep(timeslot, calendar):
 def vis():
     query = get_query(request.body.read().decode('utf-8'))
     res = []
+    cond = False
     if (User.find_one({"Name": query['name']})) is None:
-        result = Group.find_one({"Name": query['name']}, {"Precondition": 1, "_id": 0})
-        for i in result['Precondition']:
-            timeslot = Precondition.find({"id": i, "calendar": query['calendar']},
-                                         {"timeslot": 1, "_id": 0, "type_time": 1})
-            if timeslot[0]["type_time"] == "repetition":
-                res = evaluate_rep(timeslot[0]['timeslot'], query['calendar'])
+        result = Group.find_one({"Name": query['name']}, {"Precondition": 1, "Authorization": 1, "_id": 0})
+        for j in result['Authorization']:
+            if not (Auth.find_one({"id": j, "calendar": query['calendar']}, {"_id": 1}) is None):
+                cond = True
 
-            else:
-                res = evaluate_not_rep(timeslot[0]['timeslot'], query['calendar'])
+        manage_conflict_auth(result['Authorization'])
+
+        if cond:
+            for i in result['Precondition']:
+                timeslot = Precondition.find_one({"id": i, "calendar": query['calendar']},
+                                                 {"timeslot": 1, "_id": 0, "type_time": 1})
+                if timeslot["type_time"] == "repetition":
+                    res = evaluate_rep(timeslot['timeslot'], query['calendar'])
+
+                else:
+                    res = evaluate_not_rep(timeslot['timeslot'], query['calendar'])
+        else:
+            return None
 
     else:
         if query['type'] == 'delegate':
             result = User.find_one({"Name": query['name']}, {"Admin_auth": 1, "_id": 0})
             for i in result['Admin_auth']:
-                timeslot = Admin_Auth.find({"id": i, "calendar": query['calendar']},
+                timeslot = Admin_Auth.find_one({"id": i, "calendar": query['calendar']},
                                            {"timeslot": 1, "_id": 0, "type_time": 1})
-                if timeslot[0]["type_time"] == "repetition":
-                    res = evaluate_rep_admin(timeslot[0]['timeslot'], query['calendar'])
+                if timeslot["type_time"] == "repetition":
+                    res = evaluate_rep_admin(timeslot['timeslot'], query['calendar'])
                 else:
-                    res = evaluate_not_rep_admin(timeslot[0]['timeslot'], query['calendar'])
+                    res = evaluate_not_rep_admin(timeslot['timeslot'], query['calendar'])
         else:
-            result = User.find_one({"Name": query['name']}, {"Precondition": 1, "_id": 0})
-            for i in result['Precondition']:
-                timeslot = Precondition.find({"id": i, "calendar": query['calendar']},
-                                             {"timeslot": 1, "_id": 0, "type_time": 1})
-                if timeslot[0]["type_time"] == "repetition":
-                    res = evaluate_rep(timeslot[0]['timeslot'], query['calendar'])
-                else:
-                    res = evaluate_not_rep(timeslot[0]['timeslot'], query['calendar'])
+            result = User.find_one({"Name": query['name']}, {"Precondition": 1, "Authorization": 1, "_id": 0})
+            for j in result['Authorization']:
+                if not (Auth.find_one({"id": j, "calendar": query['calendar']}, {}) is None):
+                    cond = True
+            if cond:
+                for i in result['Precondition']:
+                    timeslot = Precondition.find_one({"id": i, "calendar": query['calendar']},
+                                                 {"timeslot": 1, "_id": 0, "type_time": 1})
+                    if timeslot["type_time"] == "repetition":
+                        res = evaluate_rep(timeslot['timeslot'], query['calendar'])
+                    else:
+                        res = evaluate_not_rep(timeslot['timeslot'], query['calendar'])
+            else:
+                return None
 
     return json_util.dumps(res)
 
