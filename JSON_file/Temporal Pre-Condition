@@ -1,0 +1,21 @@
+[{
+  "_id": {
+    "$oid": "60eead795451f461707541fe"
+  },
+  "id": "1",
+  "name": "Bob",
+  "timeslot": "1625821200-1625824800",
+  "calendar": "School",
+  "user_type": "collaborator",
+  "type_time": "not_repetition"
+},{
+  "_id": {
+    "$oid": "60eeaeb0befacc426a0d16d6"
+  },
+  "id": "2",
+  "name": "Colleghi",
+  "timeslot": "0.5:00-1.20:00",
+  "calendar": "School",
+  "user_type": "collaborator",
+  "type_time": "repetition"
+}]

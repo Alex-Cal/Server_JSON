@@ -1,0 +1,40 @@
+[{
+  "_id": "60ee9b9e68bbd97edfc01d4b",
+  "Name": "Bob",
+  "Surname": "Red",
+  "Group": [],
+  "Precondition": [
+    "1"
+  ]
+},{
+  "_id": "60ee9c7d68bbd97edfc01d4c",
+  "Name": "Carol",
+  "Surname": "Green",
+  "Group": [],
+  "Precondition": [
+    "3"
+  ],
+  "Admin_auth": [
+    "1"
+  ],
+  "Authorization": [
+    "1"
+  ]
+},{
+  "_id": {
+    "$oid": "60f051dde007709518de634d"
+  },
+  "Name": "Paasquale",
+  "Surname": "Spadafora",
+  "Group": [],
+  "Precondition": []
+},{
+  "_id": {
+    "$oid": "60f053abb61852c23b4b11ac"
+  },
+  "Name": "Salvatore",
+  "Group": [],
+  "Precondition": [
+    ""
+  ]
+}]

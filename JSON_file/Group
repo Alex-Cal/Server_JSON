@@ -1,0 +1,24 @@
+[{
+  "_id": "60ee9cef68bbd97edfc01d4d",
+  "Name": "Colleghi",
+  "User": [],
+  "Precondition": [
+    "2"
+  ],
+  "Authorization": [
+    "2",
+    "3"
+  ]
+},{
+  "_id": "60ee9d4468bbd97edfc01d4e",
+  "Name": "Collaboratori",
+  "User": [],
+  "Precondition": []
+},{
+  "_id": {
+    "$oid": "60f05372b61852c23b4b11ab"
+  },
+  "Name": "Amici",
+  "User": [],
+  "Precondition": []
+}]
