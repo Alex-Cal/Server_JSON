@@ -275,11 +275,11 @@ def evaluate_rep_admin(timeslot, calendar):
 
 
 # -------------------------------------------------------------------------------------------------------
-def evaluate_not_rep(timeslot, calendar):
+def evaluate_not_rep(timeslot, calendar, eventi):
     [start_date, start_hour, end_date, end_hour] = string_not_repetition(timeslot)
-    result = Event.find({"calendar": calendar}, {"id": 1, "start": 1, "end": 1})
+    # result = Event.find({"calendar": calendar}, {"id": 1, "start": 1, "end": 1})
     good_event = []
-    for item in result:
+    for item in eventi:
         start = datetime.fromtimestamp(int(item["start"]))
         end = datetime.fromtimestamp(int(item["end"]))
         if datetime.date(start) > end_date or datetime.date(end) < start_date:
@@ -289,11 +289,11 @@ def evaluate_not_rep(timeslot, calendar):
     return good_event
 
 
-def evaluate_rep(timeslot, calendar):
+def evaluate_rep(timeslot, calendar, eventi):
     [start_day, start_hour, end_day, end_hour] = string_repetition(timeslot)
-    result = Event.find({"calendar": calendar}, {"id": 1, "start": 1, "end": 1})
+    # result = Event.find({"calendar": calendar}, {"id": 1, "start": 1, "end": 1})
     good_event = []
-    for item in result:
+    for item in eventi:
         start = datetime.fromtimestamp(int(item["start"]))
         end = datetime.fromtimestamp(int(item["end"]))
         start_hour_pre = datetime.strptime(start_hour, "%H:%M").time()
@@ -305,6 +305,7 @@ def evaluate_rep(timeslot, calendar):
             good_event.append(item)
     return good_event
 
+
 def manage_conflict_auth(autorizzazioni):
     auth = []
     print(autorizzazioni)
@@ -313,11 +314,41 @@ def manage_conflict_auth(autorizzazioni):
     print(auth)
 
 
-# appena accede, l'utente seleziona il calendario che vuole vedere e con un ulteriroe selezione sceglie se vedere le viste dei gruppi oppure delegato (se  ha il pemresso di esserlo)
-# dobbiamo capire se l'utente in questione, se non si tratta di un gruppo, se applicare la precondizione oppure la admin_uth
-# potrei avere entrambe, in relatà, ma quale visualizzazione avrà? Magari con un tastino avere la visualizzazione dleegate o non delegate
-# (oppure invece di not_delegate, faccio scegliere quale visualzizione rispetto  quale gruppo di appartenenza vuole avere)
-# per emplicità ci limitiamo ad un utente le cui viste sono associate ai gruppi ora vediamo se vogliamo quelle singole
+def authorization_filter(nome, calendario):
+    eventi_good = []
+    auth = Auth.find_one({'subject': nome, 'calendar': calendario, 'type_auth': 'read'},
+                         {'calendar': 1, 'type_event': 1, 'sign': 1})
+    eventi = Event.find({'calendar': calendario}, {"id": 1, "start": 1, "end": 1, 'type': 1})
+    for item in eventi:
+        if auth['sign'] == '+':
+            if item['type'] == auth['type_event']:
+                eventi_good.append(item)
+        elif auth['sign'] == '-':
+            if item['type'] != auth['type_event']:
+                eventi_good.append(item)
+    return eventi_good
+
+
+def precond(pre, query, eventi):
+    for i in pre:
+        timeslot = Precondition.find_one({"id": i, "calendar": query['calendar']},
+                                         {"timeslot": 1, "_id": 0, "type_time": 1})
+        if timeslot["type_time"] == "repetition":
+            return evaluate_rep(timeslot['timeslot'], query['calendar'], eventi)
+        else:
+            return evaluate_not_rep(timeslot['timeslot'], query['calendar'], eventi)
+
+
+def auth_adm(auth, query):
+    for i in auth:
+        timeslot = Admin_Auth.find_one({"id": i, "calendar": query['calendar']},
+                                       {"timeslot": 1, "_id": 0, "type_time": 1})
+        if timeslot["type_time"] == "repetition":
+            return evaluate_rep_admin(timeslot['timeslot'], query['calendar'])
+
+        else:
+            return evaluate_not_rep_admin(timeslot['timeslot'], query['calendar'])
+
 @post("/event_vis")
 def vis():
     query = get_query(request.body.read().decode('utf-8'))
@@ -329,43 +360,27 @@ def vis():
             if not (Auth.find_one({"id": j, "calendar": query['calendar']}, {"_id": 1}) is None):
                 cond = True
 
-        manage_conflict_auth(result['Authorization'])
-
+        # manage_conflict_auth(result['Authorization'])
+        # dopo aver gestito l'eventuale conflitto, avrò l'id dell'autorizzazione da applicare e passare alla funzione successiva
+        events = authorization_filter(query['name'], query['calendar'])
         if cond:
-            for i in result['Precondition']:
-                timeslot = Precondition.find_one({"id": i, "calendar": query['calendar']},
-                                                 {"timeslot": 1, "_id": 0, "type_time": 1})
-                if timeslot["type_time"] == "repetition":
-                    res = evaluate_rep(timeslot['timeslot'], query['calendar'])
-
-                else:
-                    res = evaluate_not_rep(timeslot['timeslot'], query['calendar'])
+            res = precond(result['Precondition'], query, events)
         else:
             return None
 
     else:
-        if query['type'] == 'delegate':
+        if not (Admin_Auth.find_one({"name": query['name'], "calendar": query['calendar']}, {}) is None):
             result = User.find_one({"Name": query['name']}, {"Admin_auth": 1, "_id": 0})
-            for i in result['Admin_auth']:
-                timeslot = Admin_Auth.find_one({"id": i, "calendar": query['calendar']},
-                                           {"timeslot": 1, "_id": 0, "type_time": 1})
-                if timeslot["type_time"] == "repetition":
-                    res = evaluate_rep_admin(timeslot['timeslot'], query['calendar'])
-                else:
-                    res = evaluate_not_rep_admin(timeslot['timeslot'], query['calendar'])
+            res = auth_adm(result['Admin_auth'], query)
         else:
             result = User.find_one({"Name": query['name']}, {"Precondition": 1, "Authorization": 1, "_id": 0})
             for j in result['Authorization']:
                 if not (Auth.find_one({"id": j, "calendar": query['calendar']}, {}) is None):
                     cond = True
+
+            events = authorization_filter(query['name'], query['calendar'])
             if cond:
-                for i in result['Precondition']:
-                    timeslot = Precondition.find_one({"id": i, "calendar": query['calendar']},
-                                                 {"timeslot": 1, "_id": 0, "type_time": 1})
-                    if timeslot["type_time"] == "repetition":
-                        res = evaluate_rep(timeslot['timeslot'], query['calendar'])
-                    else:
-                        res = evaluate_not_rep(timeslot['timeslot'], query['calendar'])
+                res = precond(result['Precondition'], query, events)
             else:
                 return None
 
