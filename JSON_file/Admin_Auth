@@ -1,11 +1,10 @@
 [{
   "_id": {
-    "$oid": "60f41430cd8a6aafe6fce9cb"
+    "$oid": "60f831071f18ed584fc5c7c7"
   },
-  "id": "1",
-  "name": "Carol",
-  "timeslot": "0.10:00-1.23:30",
-  "calendar": "School",
-  "user_type": "delegate",
-  "type_time": "repetition"
+  "name": "60f8280ef748c26325297abb",
+  "timeslot": "3.9:00-3.18:00",
+  "calendar": "60f82761f748c26325297ab8",
+  "type_time": "repetition",
+  "user_type": "delegate"
 }]

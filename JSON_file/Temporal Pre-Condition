@@ -1,21 +1,10 @@
 [{
   "_id": {
-    "$oid": "60eead795451f461707541fe"
+    "$oid": "60f834d989d160c6ad083a6e"
   },
-  "id": "1",
-  "name": "Bob",
-  "timeslot": "1625821200-1625824800",
-  "calendar": "School",
-  "user_type": "collaborator",
-  "type_time": "not_repetition"
-},{
-  "_id": {
-    "$oid": "60eeaeb0befacc426a0d16d6"
-  },
-  "id": "2",
-  "name": "Colleghi",
-  "timeslot": "0.5:00-1.20:00",
-  "calendar": "School",
-  "user_type": "collaborator",
-  "type_time": "repetition"
+  "name": "60f827cff748c26325297aba",
+  "timeslot": "1626937200-1626944400",
+  "calendar": "60f82761f748c26325297ab8",
+  "type_time": "not_repetition",
+  "user_type": "collaborator"
 }]

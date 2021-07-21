@@ -1,40 +1,53 @@
 [{
-  "_id": "60ee9b9e68bbd97edfc01d4b",
-  "Name": "Bob",
-  "Surname": "Red",
-  "Group": [],
-  "Precondition": [
-    "1"
-  ]
-},{
-  "_id": "60ee9c7d68bbd97edfc01d4c",
-  "Name": "Carol",
-  "Surname": "Green",
-  "Group": [],
-  "Precondition": [
-    "3"
+  "_id": {
+    "$oid": "60f826acf748c26325297ab5"
+  },
+  "name": "Bob",
+  "surname": "Red",
+  "Group": [
+    {
+      "$oid": "60f827cff748c26325297aba"
+    }
   ],
+  "Precondition": [],
+  "Admin_auth": [],
+  "Authorization": []
+},{
+  "_id": {
+    "$oid": "60f826c4f748c26325297ab6"
+  },
+  "name": "Carol",
+  "surname": "Green",
+  "Group": [
+    {
+      "$oid": "60f827cff748c26325297aba"
+    }
+  ],
+  "Precondition": [],
+  "Admin_auth": [],
+  "Authorization": []
+},{
+  "_id": {
+    "$oid": "60f826dcf748c26325297ab7"
+  },
+  "name": "Alex",
+  "surname": "White",
+  "Group": [],
+  "Precondition": [],
+  "Admin_auth": [],
+  "Authorization": []
+},{
+  "_id": {
+    "$oid": "60f8280ef748c26325297abb"
+  },
+  "name": "Salva",
+  "surname": "Suri",
+  "Group": [],
+  "Precondition": [],
   "Admin_auth": [
-    "1"
+    {
+      "$oid": "60f831071f18ed584fc5c7c7"
+    }
   ],
-  "Authorization": [
-    "1"
-  ]
-},{
-  "_id": {
-    "$oid": "60f051dde007709518de634d"
-  },
-  "Name": "Paasquale",
-  "Surname": "Spadafora",
-  "Group": [],
-  "Precondition": []
-},{
-  "_id": {
-    "$oid": "60f053abb61852c23b4b11ac"
-  },
-  "Name": "Salvatore",
-  "Group": [],
-  "Precondition": [
-    ""
-  ]
+  "Authorization": []
 }]

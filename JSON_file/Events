@@ -1,37 +1,23 @@
 [{
   "_id": {
-    "$oid": "60e2d99efb924832684f2e00"
+    "$oid": "60f82b711bbae6c24d0a3da6"
   },
-  "id": "1",
-  "title": "LezioneFisica",
-  "type": "Lezione",
-  "start": "1625817600",
-  "end": "1625824800",
-  "color": "#ff0000",
-  "allDay": "true",
-  "calendar": "School"
+  "title": "Meeting(ProgettoA)",
+  "type": "Meeting",
+  "start": "1626858000",
+  "end": "1626861600",
+  "color": "#fff000",
+  "allDay": "false",
+  "calendar": "60f82761f748c26325297ab8"
 },{
   "_id": {
-    "$oid": "60e2da08fb924832684f2e01"
+    "$oid": "60f82bfc1bbae6c24d0a3da7"
   },
-  "id": "2",
-  "title": "ProgettoA",
-  "type": "Lezione",
-  "start": "1625853600",
-  "end": "1625857200",
+  "title": "Meeting(ProgettoB)",
+  "type": "Meeting",
+  "start": "1626944400",
+  "end": "1626948000",
   "color": "#fff000",
-  "allDay": "true",
-  "calendar": "School"
-},{
-  "_id": {
-    "$oid": "60f413a7ab5e2d0bce64b725"
-  },
-  "id": "3",
-  "title": "ProgettoB",
-  "type": "Lezione",
-  "start": "1626721200",
-  "end": "1626728400",
-  "color": "#fff000",
-  "allDay": "true",
-  "calendar": "School"
+  "allDay": "false",
+  "calendar": "60f82761f748c26325297ab8"
 }]

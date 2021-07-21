@@ -1,24 +1,24 @@
 [{
-  "_id": "60ee9cef68bbd97edfc01d4d",
-  "Name": "Colleghi",
-  "User": [],
+  "_id": {
+    "$oid": "60f827cff748c26325297aba"
+  },
+  "name": "Colleghi",
+  "User": [
+    {
+      "$oid": "60f826acf748c26325297ab5"
+    },
+    {
+      "$oid": "60f826c4f748c26325297ab6"
+    }
+  ],
   "Precondition": [
-    "2"
+    {
+      "$oid": "60f834d989d160c6ad083a6e"
+    }
   ],
   "Authorization": [
-    "2",
-    "3"
+    {
+      "$oid": "60f8391fa2368d55ba99b515"
+    }
   ]
-},{
-  "_id": "60ee9d4468bbd97edfc01d4e",
-  "Name": "Collaboratori",
-  "User": [],
-  "Precondition": []
-},{
-  "_id": {
-    "$oid": "60f05372b61852c23b4b11ab"
-  },
-  "Name": "Amici",
-  "User": [],
-  "Precondition": []
 }]

@@ -1,33 +1,10 @@
 [{
   "_id": {
-    "$oid": "60f54d2b40ed9cbdb213fa87"
+    "$oid": "60f8391fa2368d55ba99b515"
   },
-  "id": "1",
-  "subject": "Carol",
-  "calendar": "School",
-  "type_event": "Lezione",
-  "prop": "null",
-  "type_auth": "read",
-  "sign": "+"
-},{
-  "_id": {
-    "$oid": "60f6f646f364c2f0027ed1e7"
-  },
-  "id": "3",
-  "subject": "Colleghi",
-  "calendar": "School",
-  "type_event": "Lezione",
-  "prop": "null",
-  "type_auth": "read",
-  "sign": "-"
-},{
-  "_id": {
-    "$oid": "60f6f653f364c2f0027ed1e8"
-  },
-  "id": "2",
-  "subject": "Colleghi",
-  "calendar": "School",
-  "type_event": "Lezione",
+  "subject": "60f827cff748c26325297aba",
+  "calendar": "60f82761f748c26325297ab8",
+  "type_event": "Meeting",
   "prop": "null",
   "type_auth": "read",
   "sign": "+"
