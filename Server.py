@@ -5,7 +5,7 @@ from datetime import datetime
 
 from bottle import run, request, post, get
 import pymongo
-from bson import json_util
+from bson import json_util, ObjectId
 
 # Connection to MongoDB
 myclient = pymongo.MongoClient("mongodb://localhost:27017/")
@@ -48,7 +48,7 @@ def get_all_types(request):
 
 
 # shows all events given calendar
-@get('/list_cal_event_multiple')
+@post('/list_cal_event_multiple')
 def list_event():
     items_ev = []
     res = []
@@ -57,32 +57,28 @@ def list_event():
     temp_type = request.params.get('type')
 
     type = get_all_types(temp_type)
-    print(type)
     # Now, type is a list of this form: ['Scuola', 'Work'], so you must make multiple queries (or a single query with an OR operator)
-
     for i in type:
-        items = Cal.find({'Type': i}, {'Events': 1})
-        print(i)
+        items = Cal.find({'type': i}, {'Events': 1})
         res.append(items[0]['Events'])
     for x in res:
         for y in x:
-            items_ev.append(Event.find({'id': y}, {'title', 'start', 'end', 'color', 'allDay'}))
+            items_ev.append(Event.find({'_id': y}))
     for i in items_ev:
         s.append(str(json_util.dumps(i)))
-    print(s)
     return (str(s).replace("'[", '')).replace("]'", '')
 
 
 # list one type event
-@get('/list_cal_event')
+@post('/list_cal_event')
 def list_one_type_event():
     items_ev = []
     type = request.params.get('type')
-    items = Cal.find({'Type': type}, {'Events': 1})
+    items = Cal.find({'type': type}, {'Events': 1})
     res = items[0]['Events']
     for x in res:
-        items_ev.append(Event.find({'id': x}, {'title', 'start', 'end', 'color', 'allDay'}))
-    s = (str)(json_util.dumps(items_ev))
+        items_ev.append(Event.find({'_id': x}))
+    s = str(json_util.dumps(items_ev))
     a = ((s.replace('[', '')).replace(']', ''))
     return "[" + a + "]"
 
@@ -91,23 +87,23 @@ def list_one_type_event():
 @post('/mod_title')
 def update_title_events():
     query = get_query(request.body.read().decode('utf-8'))
-    myquery = {"id": query['id']}
+    myquery = {"_id": query['id']}
     newvalues = {"$set": {"title": query['title']}}
     Event.update_one(myquery, newvalues)
     item = Event.find()
     return json_util.dumps(item)
 
 
-# delete a specific event
+# delete a specific event parametri saranno l'id dell'evento da cancellare ed il calendario di riferimento
 @post('/delete_event')
 def delete_event():
     query = get_query(request.body.read().decode('utf-8'))
-    myquery = {"id": query['id']}
-    Event.delete_one(myquery)
-    new_query = {"Type": query['calendar']}
-    Cal.update_one(new_query, {"$pull": {'Events': query['id']}})
-    item = Event.find()
-    return json_util.dumps(item)
+    myquery = {"_id": ObjectId(query['id'])}
+    res = Event.find_one(myquery, {"calendar": 1})
+    ris = Event.delete_one(myquery)
+    new_query = {"_id": ObjectId(res['calendar'])}
+    Cal.update_one(new_query, {"$pull": {'Events': ObjectId(query['id'])}})
+    return "Ciao"
 
 
 def create_query(list_param):
@@ -138,30 +134,29 @@ def get_query(request):
     return create_query(pair)
 
 
-# insert new event curl --data "id=6&title=Cena Fisic&type=Cena&start=1627819982&end=1627823582&calendar=School"
-# http://0.0.0.0:12345/insert_event
-@post('/insert_event')
+
+# curl --data "title=Meeting(ProgettoA)&type=Meeting&start=1626858000&end=1626861600&color=#fff000&allDay=false&calendar=60f82761f748c26325297ab8" http://0.0.0.0:12345/insert_event@post('/insert_event')
 def insert_event():
     query = get_query(request.body.read().decode('utf-8'))
     Event.insert_one(query)
-    myquery = {'Type': query['calendar']}
-    newvalues = {"$addToSet": {'Events': query['id']}}
+    myquery = {'_id': ObjectId(query['calendar'])}
+    res = Event.find({}, {'_id'}).sort('_id', -1).limit(1)
+    newvalues = {"$addToSet": {'Events': ObjectId(res[0]['_id'])}}
     Cal.update_one(myquery, newvalues)
 
-
+#curl --data "type=School&owner=Alex" http://0.0.0.0:12345/insert_cal
 @post('/insert_cal')
 def insert_cal():
     query = get_query(request.body.read().decode('utf-8'))
-    query2 = {"Events": [], "Precondition": [], "Admin_auth": []}
+    query2 = {"Events": [], "Precondition": [], "Admin_auth": [], "Authorization": []}
     new_dict = {**query, **query2}
     Cal.insert_one(new_dict)
 
-
+#curl --data "name=Bob&Surname=Red" http://0.0.0.0:12345/insert_user
 @post('/insert_user')
 def insert_user():
     query = get_query(request.body.read().decode('utf-8'))
-    print(query)
-    query2 = {"Group": [], "Precondition": [], "Admin_auth": []}
+    query2 = {"Group": [], "Precondition": [], "Admin_auth": [], "Authorization": []}
     new_dict = {**query, **query2}
     User.insert_one(new_dict)
 
@@ -169,15 +164,14 @@ def insert_user():
 @post('/insert_group')
 def insert_group():
     query = get_query(request.body.read().decode('utf-8'))
-    print(query)
-    query2 = {"User": [], "Precondition": []}
+    query2 = {"User": [], "Precondition": [], "Authorization": []}
     new_dict = {**query, **query2}
     Group.insert_one(new_dict)
 
 
 @post("/list_us")
 def list_us():
-    res = User.find({}, {"Name": 1, "_id": 0, "Surname": 1})
+    res = User.find({}, {"name": 1, "_id": 0, "surname": 1})
     return json_util.dumps(res)
 
 
@@ -185,38 +179,68 @@ def list_us():
 @post("/ins_auth")
 def insert_auth():
     query = get_query(request.body.read().decode('utf-8'))
-    myquery = {'Type': query['calendar']}
-    newvalues = {"$addToSet": {'Authorization': query['id']}}
-    myquery2 = {'Name': query['subject']}
+    myquery = {'_id': ObjectId(query['calendar'])}
+    myquery2 = {'_id': ObjectId(query['subject'])}
+    Auth.insert_one(query)
+    res = Auth.find({}, {'_id'}).sort('_id', -1).limit(1)
+    newvalues = {"$addToSet": {'Authorization': ObjectId(res[0]['_id'])}}
     if User.find_one(myquery2) is None:
-        Auth.insert_one(query)
         Group.update_one(myquery2, newvalues)
-        Cal.update_one(myquery, newvalues)
     else:
-        Auth.insert_one(query)
         User.update_one(myquery2, newvalues)
-        Cal.update_one(myquery, newvalues)
+    Cal.update_one(myquery, newvalues)
 
-
-@post('/pre_admin')
-def insert_precondition_or_admin_auth():
+@post('/precondition')
+def insert_precondition():
     query = get_query(request.body.read().decode('utf-8'))
-    myquery = {'Type': query['calendar']}
-    newvalues = {"$addToSet": {'Precondition': query['id']}}
-    myquery2 = {'Type': query['calendar']}
-    newvalues2 = {"$addToSet": {'Admin_auth': query['id']}}
-    myquery3 = {'Name': query['name']}
-    if query['user_type'] == 'delegate':
-        Admin_Auth.insert_one(query)
-        Cal.update_one(myquery2, newvalues2)
-        User.update_one(myquery3, newvalues2)
+    myquery = {'_id': ObjectId(query['calendar'])}
+    myquery1 = {'_id': ObjectId(query['name'])}
+    newquery = {"user_type": "collaborator"}
+    new_dict = {**query, **newquery}
+    Precondition.insert_one(new_dict)
+    res = Precondition.find({}, {'_id'}).sort('_id', -1).limit(1)
+    newvalues = {"$addToSet": {'Precondition': ObjectId(res[0]['_id'])}}
+
+    if (User.find_one(myquery1)) is None:
+        Group.update_one(myquery1, newvalues)
     else:
-        Precondition.insert_one(query)
-        Cal.update_one(myquery, newvalues)
-        if (User.find_one(myquery3)) is None:
-            Group.update_one(myquery3, newvalues)
+        User.update_one(myquery1, newvalues)
+    Cal.update_one(myquery, newvalues)
+
+@post('/auth_admin')
+def insert_admin_auth():
+    query = get_query(request.body.read().decode('utf-8'))
+    myquery = {'_id': ObjectId(query['calendar'])}
+    myquery1 = {'_id': ObjectId(query['name'])}
+    newquery = {"user_type": "delegate"}
+    new_dict = {**query, **newquery}
+    Admin_Auth.insert_one(new_dict)
+    res = Admin_Auth.find({}, {'_id'}).sort('_id', -1).limit(1)
+    newvalues = {"$addToSet": {'Admin_auth': ObjectId(res[0]['_id'])}}
+    User.update_one(myquery1, newvalues)
+    Cal.update_one(myquery, newvalues)
+
+@post("/insert_user_group")
+def insert_user_group():
+    query = get_query(request.body.read().decode('utf-8'))
+    if User.find_one({"_id": ObjectId(query["user"])}) is None:
+        return "Utente inesistente"
+    else:
+        if not(Group.find_one({'_id': ObjectId(query['group'])})) is None:
+            newvalues = {"$addToSet": {'User': ObjectId(query['user'])}}
+            Group.update_one({'_id': ObjectId(query['group'])}, newvalues)
         else:
-            User.update_one(myquery3, newvalues)
+            return "Gruppo inesistente"
+
+@post("/cal_id")
+def cal_id():
+    query = get_query(request.body.read().decode('utf-8'))
+    lista = []
+    res = Cal.find({"type": query['name']}, {"_id": 1, "type": 1})
+    for item in res:
+        lista.append(str(item["_id"]) + " " + item["type"])
+    return lista
+
 
 
 def string_repetition(timeslot):
@@ -248,7 +272,7 @@ def string_not_repetition(timeslot):
 
 def evaluate_not_rep_admin(timeslot, calendar):
     [start_date, start_hour, end_date, end_hour] = string_not_repetition(timeslot)
-    result = Event.find({"calendar": calendar}, {"_id": 1, "start": 1, "end": 1})
+    result = Event.find({"calendar": calendar})
     good_event = []
     for item in result:
         start = datetime.fromtimestamp(int(item["start"]))
@@ -261,7 +285,7 @@ def evaluate_not_rep_admin(timeslot, calendar):
 
 def evaluate_rep_admin(timeslot, calendar):
     [start_day, start_hour, end_day, end_hour] = string_repetition(timeslot)
-    result = Event.find({"calendar": calendar}, {"_id": 1, "start": 1, "end": 1})
+    result = Event.find({"calendar": calendar})
     good_event = []
     for item in result:
         start = datetime.fromtimestamp(int(item["start"]))
@@ -275,9 +299,8 @@ def evaluate_rep_admin(timeslot, calendar):
 
 
 # -------------------------------------------------------------------------------------------------------
-def evaluate_not_rep(timeslot, calendar, eventi):
+def evaluate_not_rep(timeslot, eventi):
     [start_date, start_hour, end_date, end_hour] = string_not_repetition(timeslot)
-    # result = Event.find({"calendar": calendar}, {"id": 1, "start": 1, "end": 1})
     good_event = []
     for item in eventi:
         start = datetime.fromtimestamp(int(item["start"]))
@@ -289,9 +312,8 @@ def evaluate_not_rep(timeslot, calendar, eventi):
     return good_event
 
 
-def evaluate_rep(timeslot, calendar, eventi):
+def evaluate_rep(timeslot,eventi):
     [start_day, start_hour, end_day, end_hour] = string_repetition(timeslot)
-    # result = Event.find({"calendar": calendar}, {"id": 1, "start": 1, "end": 1})
     good_event = []
     for item in eventi:
         start = datetime.fromtimestamp(int(item["start"]))
@@ -318,7 +340,7 @@ def authorization_filter(nome, calendario):
     eventi_good = []
     auth = Auth.find_one({'subject': nome, 'calendar': calendario, 'type_auth': 'read'},
                          {'calendar': 1, 'type_event': 1, 'sign': 1})
-    eventi = Event.find({'calendar': calendario}, {"id": 1, "start": 1, "end": 1, 'type': 1})
+    eventi = Event.find({'calendar': calendario})
     for item in eventi:
         if auth['sign'] == '+':
             if item['type'] == auth['type_event']:
@@ -329,19 +351,19 @@ def authorization_filter(nome, calendario):
     return eventi_good
 
 
-def precond(pre, query, eventi):
+def precond(pre, eventi):
     for i in pre:
-        timeslot = Precondition.find_one({"id": i, "calendar": query['calendar']},
+        timeslot = Precondition.find_one({"_id": i},
                                          {"timeslot": 1, "_id": 0, "type_time": 1})
         if timeslot["type_time"] == "repetition":
-            return evaluate_rep(timeslot['timeslot'], query['calendar'], eventi)
+            return evaluate_rep(timeslot['timeslot'], eventi)
         else:
-            return evaluate_not_rep(timeslot['timeslot'], query['calendar'], eventi)
+            return evaluate_not_rep(timeslot['timeslot'], eventi)
 
 
 def auth_adm(auth, query):
     for i in auth:
-        timeslot = Admin_Auth.find_one({"id": i, "calendar": query['calendar']},
+        timeslot = Admin_Auth.find_one({"_id": i},
                                        {"timeslot": 1, "_id": 0, "type_time": 1})
         if timeslot["type_time"] == "repetition":
             return evaluate_rep_admin(timeslot['timeslot'], query['calendar'])
@@ -354,33 +376,33 @@ def vis():
     query = get_query(request.body.read().decode('utf-8'))
     res = []
     cond = False
-    if (User.find_one({"Name": query['name']})) is None:
-        result = Group.find_one({"Name": query['name']}, {"Precondition": 1, "Authorization": 1, "_id": 0})
+    if (User.find_one({"_id": ObjectId(query['name'])})) is None:
+        result = Group.find_one({"_id": ObjectId(query['name'])}, {"Precondition": 1, "Authorization": 1, "_id": 0})
         for j in result['Authorization']:
-            if not (Auth.find_one({"id": j, "calendar": query['calendar']}, {"_id": 1}) is None):
+            if not (Auth.find_one({"_id": j}, {"_id": 1}) is None):
                 cond = True
 
         # manage_conflict_auth(result['Authorization'])
         # dopo aver gestito l'eventuale conflitto, avrò l'id dell'autorizzazione da applicare e passare alla funzione successiva
         events = authorization_filter(query['name'], query['calendar'])
         if cond:
-            res = precond(result['Precondition'], query, events)
+            res = precond(result['Precondition'], events)
         else:
             return None
 
     else:
         if not (Admin_Auth.find_one({"name": query['name'], "calendar": query['calendar']}, {}) is None):
-            result = User.find_one({"Name": query['name']}, {"Admin_auth": 1, "_id": 0})
+            result = User.find_one({"_id": ObjectId(query['name'])}, {"Admin_auth": 1, "_id": 0})
             res = auth_adm(result['Admin_auth'], query)
         else:
-            result = User.find_one({"Name": query['name']}, {"Precondition": 1, "Authorization": 1, "_id": 0})
+            result = User.find_one({"_id": ObjectId(query['name'])}, {"Precondition": 1, "Authorization": 1, "_id": 0})
             for j in result['Authorization']:
-                if not (Auth.find_one({"id": j, "calendar": query['calendar']}, {}) is None):
+                if not (Auth.find_one({"_id": j}, {"_id": 1}) is None):
                     cond = True
 
             events = authorization_filter(query['name'], query['calendar'])
             if cond:
-                res = precond(result['Precondition'], query, events)
+                res = precond(result['Precondition'], events)
             else:
                 return None
 
