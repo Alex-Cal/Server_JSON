@@ -94,6 +94,34 @@ def update_title_events():
     return json_util.dumps(item)
 
 
+@post("/user_cal")
+def user_cal():
+    query = get_query(request.body.read().decode('utf-8'))
+    list_cal = []
+    list_calendar = []
+    list_group = []
+    res = Cal.find({"owner": query['id']}, {"type": 1})
+    for item in res:
+        if not item is None:
+            list_cal.append(item['type'])
+
+    ris = Group.find({}, {"_id": 1, "User": 1})
+    for item in ris:
+        for user in item['User']:
+            if user == ObjectId(query['id']):
+                list_group.append(str(item['_id']))
+    for item in list_group:
+        result = Auth.find({"subject": item}, {"calendar": 1})
+        for cal in result:
+            list_calendar.append(cal['calendar'])
+    for cal in list_calendar:
+        res = Cal.find({"_id": ObjectId(cal)}, {"type": 1})
+        list_cal.append(res[0]["type"])
+    return list_cal
+
+
+
+
 # delete a specific event parametri saranno l'id dell'evento da cancellare ed il calendario di riferimento
 @post('/delete_event')
 def delete_event():
@@ -134,7 +162,6 @@ def get_query(request):
     return create_query(pair)
 
 
-
 # curl --data "title=Meeting(ProgettoA)&type=Meeting&start=1626858000&end=1626861600&color=#fff000&allDay=false&calendar=60f82761f748c26325297ab8" http://0.0.0.0:12345/insert_event@post('/insert_event')
 def insert_event():
     query = get_query(request.body.read().decode('utf-8'))
@@ -144,7 +171,8 @@ def insert_event():
     newvalues = {"$addToSet": {'Events': ObjectId(res[0]['_id'])}}
     Cal.update_one(myquery, newvalues)
 
-#curl --data "type=School&owner=Alex" http://0.0.0.0:12345/insert_cal
+
+# curl --data "type=School&owner=Alex" http://0.0.0.0:12345/insert_cal
 @post('/insert_cal')
 def insert_cal():
     query = get_query(request.body.read().decode('utf-8'))
@@ -152,7 +180,8 @@ def insert_cal():
     new_dict = {**query, **query2}
     Cal.insert_one(new_dict)
 
-#curl --data "name=Bob&Surname=Red" http://0.0.0.0:12345/insert_user
+
+# curl --data "name=Bob&Surname=Red" http://0.0.0.0:12345/insert_user
 @post('/insert_user')
 def insert_user():
     query = get_query(request.body.read().decode('utf-8'))
@@ -190,6 +219,7 @@ def insert_auth():
         User.update_one(myquery2, newvalues)
     Cal.update_one(myquery, newvalues)
 
+
 @post('/precondition')
 def insert_precondition():
     query = get_query(request.body.read().decode('utf-8'))
@@ -207,6 +237,7 @@ def insert_precondition():
         User.update_one(myquery1, newvalues)
     Cal.update_one(myquery, newvalues)
 
+
 @post('/auth_admin')
 def insert_admin_auth():
     query = get_query(request.body.read().decode('utf-8'))
@@ -220,26 +251,18 @@ def insert_admin_auth():
     User.update_one(myquery1, newvalues)
     Cal.update_one(myquery, newvalues)
 
+
 @post("/insert_user_group")
 def insert_user_group():
     query = get_query(request.body.read().decode('utf-8'))
     if User.find_one({"_id": ObjectId(query["user"])}) is None:
         return "Utente inesistente"
     else:
-        if not(Group.find_one({'_id': ObjectId(query['group'])})) is None:
+        if not (Group.find_one({'_id': ObjectId(query['group'])})) is None:
             newvalues = {"$addToSet": {'User': ObjectId(query['user'])}}
             Group.update_one({'_id': ObjectId(query['group'])}, newvalues)
         else:
             return "Gruppo inesistente"
-
-@post("/cal_id")
-def cal_id():
-    query = get_query(request.body.read().decode('utf-8'))
-    lista = []
-    res = Cal.find({"type": query['name']}, {"_id": 1, "type": 1})
-    for item in res:
-        lista.append(str(item["_id"]) + " " + item["type"])
-    return lista
 
 @post("/group_id")
 def group_id():
@@ -249,7 +272,6 @@ def group_id():
     for item in res:
         lista.append(str(item["_id"]) + "-" + item["name"])
     return lista
-
 
 
 def string_repetition(timeslot):
@@ -321,7 +343,7 @@ def evaluate_not_rep(timeslot, eventi):
     return good_event
 
 
-def evaluate_rep(timeslot,eventi):
+def evaluate_rep(timeslot, eventi):
     [start_day, start_hour, end_day, end_hour] = string_repetition(timeslot)
     good_event = []
     for item in eventi:
@@ -379,6 +401,7 @@ def auth_adm(auth, query):
 
         else:
             return evaluate_not_rep_admin(timeslot['timeslot'], query['calendar'])
+
 
 @post("/event_vis")
 def vis():
