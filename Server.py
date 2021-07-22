@@ -103,7 +103,7 @@ def delete_event():
     ris = Event.delete_one(myquery)
     new_query = {"_id": ObjectId(res['calendar'])}
     Cal.update_one(new_query, {"$pull": {'Events': ObjectId(query['id'])}})
-    return "Ciao"
+    return "Evento eliminato"
 
 
 def create_query(list_param):
@@ -239,6 +239,15 @@ def cal_id():
     res = Cal.find({"type": query['name']}, {"_id": 1, "type": 1})
     for item in res:
         lista.append(str(item["_id"]) + " " + item["type"])
+    return lista
+
+@post("/group_id")
+def group_id():
+    query = get_query(request.body.read().decode('utf-8'))
+    lista = []
+    res = Group.find({"name": query['name']}, {"_id": 1, "name": 1})
+    for item in res:
+        lista.append(str(item["_id"]) + "-" + item["name"])
     return lista
 
 
