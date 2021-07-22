@@ -3,8 +3,9 @@ import json
 import re
 from datetime import datetime
 
-from bottle import run, request, post, get
+from bottle import run, request, post, get, app, response, route
 import pymongo
+import bottle
 from bson import json_util, ObjectId
 
 # Connection to MongoDB
@@ -17,6 +18,34 @@ Admin_Auth = mydb["Admin_Auth"]
 Auth = mydb["Authorization"]
 User = mydb["User"]
 Group = mydb["Group"]
+
+
+class EnableCors(object):
+    name = 'enable_cors'
+    api = 2
+
+    def apply(self, fn, context):
+        def _enable_cors(*args, **kwargs):
+            # set CORS headers
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, OPTIONS'
+            response.headers[
+                'Access-Control-Allow-Headers'] = 'Origin, Accept, Content-Type, X-Requested-With, X-CSRF-Token'
+
+            if bottle.request.method != 'OPTIONS':
+                # actual request; reply with the actual response
+                return fn(*args, **kwargs)
+
+        return _enable_cors
+
+
+app = bottle.app()
+
+
+@app.route('/cors', method=['OPTIONS', 'GET'])
+def lvambience():
+    response.headers['Content-type'] = 'application/json'
+    return '[1]'
 
 
 # shows all events
@@ -118,8 +147,6 @@ def user_cal():
         res = Cal.find({"_id": ObjectId(cal)}, {"type": 1})
         list_cal.append(res[0]["type"])
     return json_util.dumps(list_cal)
-
-
 
 
 # delete a specific event parametri saranno l'id dell'evento da cancellare ed il calendario di riferimento
@@ -263,6 +290,7 @@ def insert_user_group():
             Group.update_one({'_id': ObjectId(query['group'])}, newvalues)
         else:
             return "Gruppo inesistente"
+
 
 @post("/group_id")
 def group_id():
@@ -441,4 +469,5 @@ def vis():
     return json_util.dumps(res)
 
 
+app.install(EnableCors())
 run(host='0.0.0.0', port=12345, debug=True)
