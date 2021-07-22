@@ -117,7 +117,7 @@ def user_cal():
     for cal in list_calendar:
         res = Cal.find({"_id": ObjectId(cal)}, {"type": 1})
         list_cal.append(res[0]["type"])
-    return list_cal
+    return json_util.dumps(list_cal)
 
 
 
