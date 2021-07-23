@@ -30,7 +30,8 @@ class EnableCors(object):
             # set CORS headers
             response.headers['Access-Control-Allow-Origin'] = '*'
             response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, OPTIONS'
-            response.headers['Access-Control-Allow-Headers'] = 'Origin, Accept, Content-Type, X-Requested-With, X-CSRF-Token'
+            response.headers[
+                'Access-Control-Allow-Headers'] = 'Origin, Accept, Content-Type, X-Requested-With, X-CSRF-Token'
 
             if bottle.request.method != 'OPTIONS':
                 # actual request; reply with the actual response
@@ -42,20 +43,20 @@ class EnableCors(object):
 app = bottle.app()
 
 
-@app.route('/cors', method=['OPTIONS', 'GET'])
+@app.route('/cors', method=['OPTIONS', 'POST', 'GET'])
 def lvambience():
     response.headers['Content-type'] = 'application/json'
     return '[1]'
 
 
 # shows all events
-@get('/')
+@post('/')
 def index():
     return json_util.dumps(Event.find())
 
 
 # shows all calendar
-@get('/cal')
+@post('/cal')
 def calendar():
     return json_util.dumps(Cal.find())
 
@@ -125,14 +126,17 @@ def update_title_events():
 
 @post("/user_cal")
 def user_cal():
-    query = get_query(request.body.read().decode('utf-8'))
+    query = get_query_new(request.body.read().decode('utf-8'))
     list_cal = []
     list_calendar = []
     list_group = []
-    res = Cal.find({"owner": query['id']}, {"type": 1})
+    res = Cal.find({"owner": query['id']}, {"type": 1, "_id": 1})
     for item in res:
-        if not item is None:
-            list_cal.append(item['type'])
+        temp = {
+            "id": str(item["_id"]),
+            "type": item["type"]
+        }
+        list_cal.append(temp)
 
     ris = Group.find({}, {"_id": 1, "User": 1})
     for item in ris:
@@ -144,8 +148,13 @@ def user_cal():
         for cal in result:
             list_calendar.append(cal['calendar'])
     for cal in list_calendar:
-        res = Cal.find({"_id": ObjectId(cal)}, {"type": 1})
-        list_cal.append(res[0]["type"])
+        res = Cal.find({"_id": ObjectId(cal)}, {"type": 1, "_id": 1})
+        temp = {
+            "id": str(res[0]["_id"]),
+            "type": res[0]["type"]
+        }
+        list_cal.append(temp)
+
     return json_util.dumps(list_cal)
 
 
@@ -166,6 +175,29 @@ def create_query(list_param):
     for i in range(0, len(list_param)):
         query[list_param[i][0]] = list_param[i][1]
     return query
+
+
+def get_query_new(r):
+    request = r[1:len(r) - 1]
+    pair = []
+    point_list = []
+    comma_list = []
+    for item in re.finditer(',', request):
+        comma_list.append(item.start())
+
+    for item in re.finditer(':', request):
+        point_list.append(item.start())
+
+    if len(comma_list) == 0:
+        pair.append(((request[1:point_list[0] - 1]), request[point_list[0] + 2:len(request) - 1]))
+        return create_query(pair)
+    pair.append(((request[1:point_list[0] - 1]), request[point_list[0] + 2:comma_list[0] - 1]))
+    for i in range(0, len(comma_list) - 1):
+        pair.append(
+            (request[comma_list[i] + 2:point_list[i + 1] - 1], request[point_list[i + 1] + 2:comma_list[i + 1] - 1]))
+    pair.append((request[comma_list[len(comma_list) - 1] + 2:point_list[len(comma_list)] - 1],
+                 request[point_list[len(comma_list)] + 2:len(request) - 1]))
+    return create_query(pair)
 
 
 def get_query(request):
@@ -227,7 +259,7 @@ def insert_group():
 
 @post("/list_us")
 def list_us():
-    res = User.find({}, {"name": 1, "_id": 0, "surname": 1})
+    res = User.find({}, {"name": 1, "_id": 0})
     return json_util.dumps(res)
 
 
@@ -395,9 +427,9 @@ def manage_conflict_auth(autorizzazioni):
     print(auth)
 
 
-def authorization_filter(nome, calendario):
+def authorization_filter(id_auth, calendario):
     eventi_good = []
-    auth = Auth.find_one({'subject': nome, 'calendar': calendario, 'type_auth': 'read'},
+    auth = Auth.find_one({"_id": ObjectId(id_auth)},
                          {'calendar': 1, 'type_event': 1, 'sign': 1})
     eventi = Event.find({'calendar': calendario})
     for item in eventi:
@@ -410,10 +442,12 @@ def authorization_filter(nome, calendario):
     return eventi_good
 
 
-def precond(pre, eventi):
+def precond(pre, eventi, calendar):
     for i in pre:
-        timeslot = Precondition.find_one({"_id": i},
+        timeslot = Precondition.find_one({"_id": i, "calendar": calendar},
                                          {"timeslot": 1, "_id": 0, "type_time": 1})
+        if timeslot is None:
+            return eventi
         if timeslot["type_time"] == "repetition":
             return evaluate_rep(timeslot['timeslot'], eventi)
         else:
@@ -430,43 +464,77 @@ def auth_adm(auth, query):
         else:
             return evaluate_not_rep_admin(timeslot['timeslot'], query['calendar'])
 
+#in caso di utente appartente a più gruppi che agiscono sullo stesso calendario, restutisco l'ID del gruppo più vicino in gerarchia
+def user_to_group_cal(user, calendar):
+    res = Group.find({}, {"_id": 1, "User": 1})
+    g = []
+    good_group = []
+    for group in res:
+        for user_id in group['User']:
+            if user == str(user_id):
+                g.append(group['_id'])
+    for group in g:
+        res = Auth.find({"subject": str(group), "calendar": calendar}, {"_id": 1})
+        for auth in res:
+            good_group.append((group, auth["_id"]))
+    return good_group
+
+
+def evaluate_auth(auth):
+    #N.B: se len == 1 e segno = +
+    if len(auth) == 1:
+        return auth
+    return auth
 
 @post("/event_vis")
 def vis():
-    query = get_query(request.body.read().decode('utf-8'))
+    query = get_query_new(request.body.read().decode('utf-8'))
     res = []
     cond = False
-    if (User.find_one({"_id": ObjectId(query['name'])})) is None:
-        result = Group.find_one({"_id": ObjectId(query['name'])}, {"Precondition": 1, "Authorization": 1, "_id": 0})
-        for j in result['Authorization']:
-            if not (Auth.find_one({"_id": j}, {"_id": 1}) is None):
-                cond = True
+    #controlla che sia delegato
+    group_auth = user_to_group_cal(query['id'], query['calendar'])
+    if group_auth is None:
+        return []
 
-        # manage_conflict_auth(result['Authorization'])
-        # dopo aver gestito l'eventuale conflitto, avrò l'id dell'autorizzazione da applicare e passare alla funzione successiva
-        events = authorization_filter(query['name'], query['calendar'])
-        if cond:
-            res = precond(result['Precondition'], events)
-        else:
-            return None
+    winning_auth = evaluate_auth(group_auth)
+    print(winning_auth)
+    events = authorization_filter(winning_auth[0][1], query['calendar'])
+    print(events)
+    result = Group.find_one({"_id": ObjectId(winning_auth[0][0])}, {"Precondition": 1, "_id": 0})
+    eventi = precond(result['Precondition'], events, query['calendar'])
 
-    else:
-        if not (Admin_Auth.find_one({"name": query['name'], "calendar": query['calendar']}, {}) is None):
-            result = User.find_one({"_id": ObjectId(query['name'])}, {"Admin_auth": 1, "_id": 0})
-            res = auth_adm(result['Admin_auth'], query)
-        else:
-            result = User.find_one({"_id": ObjectId(query['name'])}, {"Precondition": 1, "Authorization": 1, "_id": 0})
-            for j in result['Authorization']:
-                if not (Auth.find_one({"_id": j}, {"_id": 1}) is None):
-                    cond = True
+    return json_util.dumps(eventi)
 
-            events = authorization_filter(query['name'], query['calendar'])
-            if cond:
-                res = precond(result['Precondition'], events)
-            else:
-                return None
 
-    return json_util.dumps(res)
+    # if (User.find_one({"_id": ObjectId(query['name'])})) is None:
+    #     result = Group.find_one({"_id": ObjectId(query['name'])}, {"Precondition": 1, "Authorization": 1, "_id": 0})
+    #     for j in result['Authorization']:
+    #         if not (Auth.find_one({"_id": j}, {"_id": 1}) is None):
+    #             cond = True
+    #
+    #     # manage_conflict_auth(result['Authorization'])
+    #     # dopo aver gestito l'eventuale conflitto, avrò l'id dell'autorizzazione da applicare e passare alla funzione successiva
+    #     events = authorization_filter(query['name'], query['calendar'])
+    #     if cond:
+    #         res = precond(result['Precondition'], events)
+    #     else:
+    #         return None
+    #
+    # else:
+    #     if not (Admin_Auth.find_one({"name": query['name'], "calendar": query['calendar']}, {}) is None):
+    #         result = User.find_one({"_id": ObjectId(query['name'])}, {"Admin_auth": 1, "_id": 0})
+    #         res = auth_adm(result['Admin_auth'], query)
+    #     else:
+    #         result = User.find_one({"_id": ObjectId(query['name'])}, {"Precondition": 1, "Authorization": 1, "_id": 0})
+    #         for j in result['Authorization']:
+    #             if not (Auth.find_one({"_id": j}, {"_id": 1}) is None):
+    #                 cond = True
+    #
+    #         events = authorization_filter(query['name'], query['calendar'])
+    #         if cond:
+    #             res = precond(result['Precondition'], events)
+    #         else:
+    #             return None
 
 
 app.install(EnableCors())
