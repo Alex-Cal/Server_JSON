@@ -114,14 +114,48 @@ def list_one_type_event():
 
 
 # modify a given event title
-@post('/mod_title')
-def update_title_events():
-    query = get_query(request.body.read().decode('utf-8'))
-    myquery = {"_id": query['id']}
-    newvalues = {"$set": {"title": query['title']}}
-    Event.update_one(myquery, newvalues)
-    item = Event.find()
-    return json_util.dumps(item)
+@post('/mod_event')
+def update_events():
+    query = get_query_new(request.body.read().decode('utf-8'))
+    print(query)
+    lista = []
+
+
+    query['_id'] = ObjectId(query['_id'])
+    Event.find_one({"_id": query["_id"]}, {"start": 1, "end": 1})
+    print("Posso modificare?")
+    myquery = {"_id": (query['_id'])}
+    #caso delegato e admin delegato da gestire
+    if Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["username"]}):
+        Event.delete_one(myquery)
+        query.pop('username')
+        Event.insert_one(query)
+
+
+    else:
+        search_auth_write(user_to_group_cal(query['username'], query["calendar"]))
+
+
+
+def search_auth_write(auth):
+    print(auth)
+    for autorization in auth:
+        #conflitti
+        print(json_util.dumps(Auth.find({"subject": autorization[0], "type_auth": "write", "sign": "+"})) is None)
+        if not(Auth.find({"_id": ObjectId(autorization[1]), "type_auth": "write", "sign": "+"})) is None:
+            return True
+    return False
+
+
+    ##newvalues_owner_delegate = {"$set": {"title": query['title'], "allDay": query["allDay"], "calendar": query["calendar"], "color": query["color"], "type"}}
+    #nel caso di Alessandro, aggiungere un controllo se l'utente è delegato admin o delegato normale, controllado nelle Admin Auth, ma questo controllo solo per modificare la data
+    #if not (Cal.find_one({"_id": ObjectId(query["calendar"]), "owner": query['username']}) is None):
+
+
+    #newvalues = {"$set": {"title": query['title']}}
+    #Event.update_one(myquery, newvalues)
+    #item = Event.find()
+    #return json_util.dumps(item)
 
 
 @post("/user_cal")
@@ -161,13 +195,16 @@ def user_cal():
 # delete a specific event parametri saranno l'id dell'evento da cancellare ed il calendario di riferimento
 @post('/delete_event')
 def delete_event():
-    query = get_query(request.body.read().decode('utf-8'))
-    myquery = {"_id": ObjectId(query['id'])}
+    query = get_query_new(request.body.read().decode('utf-8'))
+    print(query)
+    myquery = {"_id": ObjectId(query['_id'])}
     res = Event.find_one(myquery, {"calendar": 1})
     ris = Event.delete_one(myquery)
     new_query = {"_id": ObjectId(res['calendar'])}
-    Cal.update_one(new_query, {"$pull": {'Events': ObjectId(query['id'])}})
-    return "Evento eliminato"
+    Cal.update_one(new_query, {"$pull": {'Events': ObjectId(query['_id'])}})
+    if(ris.deleted_count != 1):
+        return "Errore nella cancellazione"
+    return "Cancellazione completata con successo"
 
 
 def create_query(list_param):
@@ -221,9 +258,12 @@ def get_query(request):
     return create_query(pair)
 
 
-# curl --data "title=Meeting(ProgettoA)&type=Meeting&start=1626858000&end=1626861600&color=#fff000&allDay=false&calendar=60f82761f748c26325297ab8" http://0.0.0.0:12345/insert_event@post('/insert_event')
+# curl --data "title=Meeting(ProgettoA)&type=Meeting&start=1626858000&end=1626861600&color=#fff000&allDay=false&calendar=60f82761f748c26325297ab8" http://0.0.0.0:12345/insert_event
+@post('/insert_event')
 def insert_event():
-    query = get_query(request.body.read().decode('utf-8'))
+    print(request.body.read().decode('utf-8'))
+    query = get_query_new(request.body.read().decode('utf-8'))
+    print(query)
     Event.insert_one(query)
     myquery = {'_id': ObjectId(query['calendar'])}
     res = Event.find({}, {'_id'}).sort('_id', -1).limit(1)
@@ -497,6 +537,8 @@ def vis():
         return []
 
     winning_auth = evaluate_auth(group_auth)
+    if len(winning_auth) ==0:
+        return []
     print(winning_auth)
     events = authorization_filter(winning_auth[0][1], query['calendar'])
     print(events)
