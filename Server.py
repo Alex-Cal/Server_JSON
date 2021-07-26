@@ -20,7 +20,7 @@ Auth = mydb["Authorization"]
 User = mydb["User"]
 Group = mydb["Group"]
 
-
+#N.B. Se ci sono due auth, con stesso segno e stesso tipo, bisogna prendere la più generale/specifica ==== controllare
 class EnableCors(object):
     name = 'enable_cors'
     api = 2
@@ -117,45 +117,36 @@ def list_one_type_event():
 @post('/mod_event')
 def update_events():
     query = get_query_new(request.body.read().decode('utf-8'))
-    print(query)
-    lista = []
-
-
     query['_id'] = ObjectId(query['_id'])
     Event.find_one({"_id": query["_id"]}, {"start": 1, "end": 1})
-    print("Posso modificare?")
     myquery = {"_id": (query['_id'])}
-    #caso delegato e admin delegato da gestire
-    if Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["username"]}):
+    # caso delegato e admin delegato da gestire
+    if Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["username"]}) or \
+            search_auth_write(user_to_group_cal(query['username'], query["calendar"])):
         Event.delete_one(myquery)
         query.pop('username')
         Event.insert_one(query)
+        return "Modifica completata con successo"
+    return "Errore nella modifica"
 
 
-    else:
-        search_auth_write(user_to_group_cal(query['username'], query["calendar"]))
-
-
-
+# N.B. gestire auth più specifica e conflitto e delegato
 def search_auth_write(auth):
-    print(auth)
     for autorization in auth:
-        #conflitti
-        print(json_util.dumps(Auth.find({"subject": autorization[0], "type_auth": "write", "sign": "+"})) is None)
-        if not(Auth.find({"_id": ObjectId(autorization[1]), "type_auth": "write", "sign": "+"})) is None:
-            return True
-    return False
-
+        # conflitti
+        res = Auth.find({"_id": autorization[1], "type_auth": "write", "sign": "+"})
+        if res.count() == 0:
+            return False
+    return True
 
     ##newvalues_owner_delegate = {"$set": {"title": query['title'], "allDay": query["allDay"], "calendar": query["calendar"], "color": query["color"], "type"}}
-    #nel caso di Alessandro, aggiungere un controllo se l'utente è delegato admin o delegato normale, controllado nelle Admin Auth, ma questo controllo solo per modificare la data
-    #if not (Cal.find_one({"_id": ObjectId(query["calendar"]), "owner": query['username']}) is None):
+    # nel caso di Alessandro, aggiungere un controllo se l'utente è delegato admin o delegato normale, controllado nelle Admin Auth, ma questo controllo solo per modificare la data
+    # if not (Cal.find_one({"_id": ObjectId(query["calendar"]), "owner": query['username']}) is None):
 
-
-    #newvalues = {"$set": {"title": query['title']}}
-    #Event.update_one(myquery, newvalues)
-    #item = Event.find()
-    #return json_util.dumps(item)
+    # newvalues = {"$set": {"title": query['title']}}
+    # Event.update_one(myquery, newvalues)
+    # item = Event.find()
+    # return json_util.dumps(item)
 
 
 @post("/user_cal")
@@ -202,7 +193,7 @@ def delete_event():
     ris = Event.delete_one(myquery)
     new_query = {"_id": ObjectId(res['calendar'])}
     Cal.update_one(new_query, {"$pull": {'Events': ObjectId(query['_id'])}})
-    if(ris.deleted_count != 1):
+    if ris.deleted_count != 1:
         return "Errore nella cancellazione"
     return "Cancellazione completata con successo"
 
@@ -274,10 +265,11 @@ def insert_event():
 # curl --data "type=School&owner=Alex" http://0.0.0.0:12345/insert_cal
 @post('/insert_cal')
 def insert_cal():
-    query = get_query(request.body.read().decode('utf-8'))
+    query = get_query_new(request.body.read().decode('utf-8'))
     query2 = {"Events": [], "Precondition": [], "Admin_auth": [], "Authorization": []}
     new_dict = {**query, **query2}
     Cal.insert_one(new_dict)
+    return "Inserimento del calendario avvenuto con successo"
 
 
 # curl --data "name=Bob&Surname=Red" http://0.0.0.0:12345/insert_user
@@ -291,10 +283,14 @@ def insert_user():
 
 @post('/insert_group')
 def insert_group():
-    query = get_query(request.body.read().decode('utf-8'))
+    query = get_query_new(request.body.read().decode('utf-8'))
     query2 = {"User": [], "Precondition": [], "Authorization": []}
     new_dict = {**query, **query2}
-    Group.insert_one(new_dict)
+    if Group.find_one({"name": query["name"]}) is None:
+        Group.insert_one(new_dict)
+        return "Gruppo inserito con successo"
+    return "Impossibile inserire il gruppo"
+
 
 
 @post("/list_us")
@@ -350,18 +346,36 @@ def insert_admin_auth():
     User.update_one(myquery1, newvalues)
     Cal.update_one(myquery, newvalues)
 
+@post('/list_created_group')
+def list_group():
+    query = get_query_new(request.body.read().decode('utf-8'))
+    lista_group_id = []
+    res = Group.find({"creator": query["id"]}, {"name": 1, "_id": 1})
+    if res is None:
+        return []
+    for item in res:
+        lista_group_id.append(item)
+    return json_util.dumps(lista_group_id)
+
+
 
 @post("/insert_user_group")
 def insert_user_group():
-    query = get_query(request.body.read().decode('utf-8'))
-    if User.find_one({"_id": ObjectId(query["user"])}) is None:
-        return "Utente inesistente"
+    query = get_query_new(request.body.read().decode('utf-8'))
+    res = Cal.find_one({"owner": query["id"]})
+    if res is None:
+        return "Operazione non autorizzata"
     else:
-        if not (Group.find_one({'_id': ObjectId(query['group'])})) is None:
-            newvalues = {"$addToSet": {'User': ObjectId(query['user'])}}
-            Group.update_one({'_id': ObjectId(query['group'])}, newvalues)
+        res = User.find_one({"name": query["user"]}, {"_id": 1})
+        if res is None:
+            return "Utente inesistente"
         else:
-            return "Gruppo inesistente"
+            if (Group.find_one({'_id': ObjectId(query['group'])})) is not None:
+                newvalues = {"$addToSet": {'User': res['_id']}}
+                Group.update_one({'_id': ObjectId(query['group'])}, newvalues)
+            else:
+                return "Gruppo inesistente"
+    return "Utente inserito correttamente nel gruppo"
 
 
 @post("/group_id")
@@ -504,7 +518,8 @@ def auth_adm(auth, query):
         else:
             return evaluate_not_rep_admin(timeslot['timeslot'], query['calendar'])
 
-#in caso di utente appartente a più gruppi che agiscono sullo stesso calendario, restutisco l'ID del gruppo più vicino in gerarchia
+
+# in caso di utente appartente a più gruppi che agiscono sullo stesso calendario, restutisco l'ID del gruppo più vicino in gerarchia
 def user_to_group_cal(user, calendar):
     res = Group.find({}, {"_id": 1, "User": 1})
     g = []
@@ -521,32 +536,33 @@ def user_to_group_cal(user, calendar):
 
 
 def evaluate_auth(auth):
-    #N.B: se len == 1 e segno = +
+    # N.B: se len == 1 e segno = +
     if len(auth) == 1:
         return auth
     return auth
 
+
 @post("/event_vis")
 def vis():
+    event_owner_cal = []
     query = get_query_new(request.body.read().decode('utf-8'))
-    res = []
-    cond = False
-    #controlla che sia delegato
+    res = Cal.find({"owner": query["id"]})
+    # aggiungi tutti gli eventi contenuti nel calendario di cui è owner
+
+    if res.count() != 0:
+        ris = Event.find({"calendar": query['calendar']})
+        for item in ris:
+            event_owner_cal.append(item)
+        return json_util.dumps(event_owner_cal)
     group_auth = user_to_group_cal(query['id'], query['calendar'])
-    if group_auth is None:
-        return []
-
-    winning_auth = evaluate_auth(group_auth)
-    if len(winning_auth) ==0:
-        return []
-    print(winning_auth)
-    events = authorization_filter(winning_auth[0][1], query['calendar'])
-    print(events)
-    result = Group.find_one({"_id": ObjectId(winning_auth[0][0])}, {"Precondition": 1, "_id": 0})
-    eventi = precond(result['Precondition'], events, query['calendar'])
-
-    return json_util.dumps(eventi)
-
+    if group_auth is not None:
+        winning_auth = evaluate_auth(group_auth)
+        if len(winning_auth) != 0:
+            events = authorization_filter(winning_auth[0][1], query['calendar'])
+            result = Group.find_one({"_id": ObjectId(winning_auth[0][0])}, {"Precondition": 1, "_id": 0})
+            eventi = precond(result['Precondition'], events, query['calendar'])
+            return json_util.dumps(eventi)
+    return []
 
     # if (User.find_one({"_id": ObjectId(query['name'])})) is None:
     #     result = Group.find_one({"_id": ObjectId(query['name'])}, {"Precondition": 1, "Authorization": 1, "_id": 0})
