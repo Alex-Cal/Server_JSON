@@ -20,7 +20,8 @@ Auth = mydb["Authorization"]
 User = mydb["User"]
 Group = mydb["Group"]
 
-#N.B. Se ci sono due auth, con stesso segno e stesso tipo, bisogna prendere la più generale/specifica ==== controllare
+
+# N.B. Se ci sono due auth, con stesso segno e stesso tipo, bisogna prendere la più generale/specifica ==== controllare
 class EnableCors(object):
     name = 'enable_cors'
     api = 2
@@ -77,40 +78,24 @@ def get_all_types(request):
     return types
 
 
-# shows all events given calendar
-@post('/list_cal_event_multiple')
-def list_event():
-    items_ev = []
-    res = []
-    s = []
-    a = []
-    temp_type = request.params.get('type')
-
-    type = get_all_types(temp_type)
-    # Now, type is a list of this form: ['Scuola', 'Work'], so you must make multiple queries (or a single query with an OR operator)
-    for i in type:
-        items = Cal.find({'type': i}, {'Events': 1})
-        res.append(items[0]['Events'])
-    for x in res:
-        for y in x:
-            items_ev.append(Event.find({'_id': y}))
-    for i in items_ev:
-        s.append(str(json_util.dumps(i)))
-    return (str(s).replace("'[", '')).replace("]'", '')
+@post('/all_type_event')
+def all_type():
+    query = get_query_new(request.body.read().decode('utf-8'))
+    res = Event.find({"creator": query["id"]}, {"type": 1})
+    lista_event = set()
+    for item in res:
+        lista_event.add(item["type"])
+    return json_util.dumps(lista_event)
 
 
-# list one type event
-@post('/list_cal_event')
-def list_one_type_event():
-    items_ev = []
-    type = request.params.get('type')
-    items = Cal.find({'type': type}, {'Events': 1})
-    res = items[0]['Events']
-    for x in res:
-        items_ev.append(Event.find({'_id': x}))
-    s = str(json_util.dumps(items_ev))
-    a = ((s.replace('[', '')).replace(']', ''))
-    return "[" + a + "]"
+@post("/calendar_event")
+def cal_event():
+    query = get_query_new(request.body.read().decode('utf-8'))
+    res = Event.find({"calendar": query['calendar']}, {"_id": 1, "title": 1})
+    lista_event = []
+    for item in res:
+        lista_event.append(item)
+    return json_util.dumps(lista_event)
 
 
 # modify a given event title
@@ -272,6 +257,16 @@ def insert_cal():
     return "Inserimento del calendario avvenuto con successo"
 
 
+@post('/list_cal_owner')
+def cal_owner():
+    query = get_query_new(request.body.read().decode('utf-8'))
+    list_cal = []
+    res = Cal.find({"owner": query['id']}, {"type": 1, "_id": 1})
+    for item in res:
+        list_cal.append(item)
+    return json_util.dumps(list_cal)
+
+
 # curl --data "name=Bob&Surname=Red" http://0.0.0.0:12345/insert_user
 @post('/insert_user')
 def insert_user():
@@ -292,7 +287,6 @@ def insert_group():
     return "Impossibile inserire il gruppo"
 
 
-
 @post("/list_us")
 def list_us():
     res = User.find({}, {"name": 1, "_id": 0})
@@ -302,9 +296,10 @@ def list_us():
 # curl --data "id=1&subject=Carol&calendar=School&type_event=Lezione&prop=null&type_auth=read&sign=+" http://0.0.0.0:12345/ins_auth
 @post("/ins_auth")
 def insert_auth():
-    query = get_query(request.body.read().decode('utf-8'))
-    myquery = {'_id': ObjectId(query['calendar'])}
-    myquery2 = {'_id': ObjectId(query['subject'])}
+    query = get_query_new(request.body.read().decode('utf-8'))
+    print(query)
+    myquery = {'_id': ObjectId(query['calendar_id'])}
+    myquery2 = {'_id': ObjectId(query['group_id'])}
     Auth.insert_one(query)
     res = Auth.find({}, {'_id'}).sort('_id', -1).limit(1)
     newvalues = {"$addToSet": {'Authorization': ObjectId(res[0]['_id'])}}
@@ -317,10 +312,23 @@ def insert_auth():
 
 @post('/precondition')
 def insert_precondition():
-    query = get_query(request.body.read().decode('utf-8'))
-    myquery = {'_id': ObjectId(query['calendar'])}
-    myquery1 = {'_id': ObjectId(query['name'])}
-    newquery = {"user_type": "collaborator"}
+    query = get_query_new(request.body.read().decode('utf-8'))
+    myquery = {'_id': ObjectId(query['calendar_id'])}
+    myquery1 = {'_id': ObjectId(query['group_id'])}
+    if query['repetition'] == 'true':
+        timeslot = query['startDay'] + "." + query['startHour'] + ":" + query['startMin'] + "-" + query[
+            'endDay'] + "." + query['endHour'] + ":" + query['endMin']
+        query.pop('startDay')
+        query.pop('startHour')
+        query.pop('startMin')
+        query.pop('endDay')
+        query.pop('endHour')
+        query.pop('endMin')
+    else:
+        timeslot = query['start'] + "-" + query['end']
+        query.pop('start')
+        query.pop('end')
+    newquery = {"timeslot": timeslot}
     new_dict = {**query, **newquery}
     Precondition.insert_one(new_dict)
     res = Precondition.find({}, {'_id'}).sort('_id', -1).limit(1)
@@ -346,6 +354,7 @@ def insert_admin_auth():
     User.update_one(myquery1, newvalues)
     Cal.update_one(myquery, newvalues)
 
+
 @post('/list_created_group')
 def list_group():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -356,7 +365,6 @@ def list_group():
     for item in res:
         lista_group_id.append(item)
     return json_util.dumps(lista_group_id)
-
 
 
 @post("/insert_user_group")
@@ -480,29 +488,29 @@ def manage_conflict_auth(autorizzazioni):
         auth.append((i['_id'], i['segno']))
     print(auth)
 
-
+#TODO this one
 def authorization_filter(id_auth, calendario):
     eventi_good = []
     auth = Auth.find_one({"_id": ObjectId(id_auth)},
-                         {'calendar': 1, 'type_event': 1, 'sign': 1})
+                         {'calendar_id': 1, 'condition': 1, 'sign': 1})
+    #controlloare il tipo di condition, any, TIPO, evento_id
     eventi = Event.find({'calendar': calendario})
     for item in eventi:
         if auth['sign'] == '+':
-            if item['type'] == auth['type_event']:
+            if item['type'] == auth['condition']:
                 eventi_good.append(item)
         elif auth['sign'] == '-':
-            if item['type'] != auth['type_event']:
+            if item['type'] != auth['condition']:
                 eventi_good.append(item)
     return eventi_good
 
 
 def precond(pre, eventi, calendar):
     for i in pre:
-        timeslot = Precondition.find_one({"_id": i, "calendar": calendar},
-                                         {"timeslot": 1, "_id": 0, "type_time": 1})
+        timeslot = Precondition.find_one({"_id": i, "calendar_id": calendar})
         if timeslot is None:
             return eventi
-        if timeslot["type_time"] == "repetition":
+        if timeslot["repetition"] == "true":
             return evaluate_rep(timeslot['timeslot'], eventi)
         else:
             return evaluate_not_rep(timeslot['timeslot'], eventi)
@@ -529,7 +537,7 @@ def user_to_group_cal(user, calendar):
             if user == str(user_id):
                 g.append(group['_id'])
     for group in g:
-        res = Auth.find({"subject": str(group), "calendar": calendar}, {"_id": 1})
+        res = Auth.find({"group_id": str(group), "calendar_id": calendar}, {"_id": 1})
         for auth in res:
             good_group.append((group, auth["_id"]))
     return good_group
@@ -546,14 +554,17 @@ def evaluate_auth(auth):
 def vis():
     event_owner_cal = []
     query = get_query_new(request.body.read().decode('utf-8'))
-    res = Cal.find({"owner": query["id"]})
+
+
+    res = Cal.find_one({"owner": query["id"], "_id": ObjectId(query['calendar'])})
     # aggiungi tutti gli eventi contenuti nel calendario di cui è owner
 
-    if res.count() != 0:
-        ris = Event.find({"calendar": query['calendar']})
+    if res is not None:
+        ris = Event.find({"calendar": str(res['_id'])})
         for item in ris:
             event_owner_cal.append(item)
         return json_util.dumps(event_owner_cal)
+
     group_auth = user_to_group_cal(query['id'], query['calendar'])
     if group_auth is not None:
         winning_auth = evaluate_auth(group_auth)
