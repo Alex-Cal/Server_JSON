@@ -2,6 +2,7 @@ import time
 import json
 import re
 from datetime import datetime
+from io import BytesIO
 
 from bottle import run, request, post, get, app, response, route
 from bottle_cors_plugin import cors_plugin
@@ -130,6 +131,11 @@ def search_auth_write(auth, event_id, event_type):
     # Event.update_one(myquery, newvalues)
     # item = Event.find()
     # return json_util.dumps(item)
+
+@get('/image')
+def video_image():
+    user_id = request.query.user
+    return bottle.static_file((user_id+".jpg"), root="", mimetype='image/jpg')
 
 
 @post("/user_cal")
@@ -495,7 +501,7 @@ def manage_conflict_auth(autorizzazioni):
 def authorization_filter(id_auth, calendario):
     eventi_good = []
     flag = False
-    auth = Auth.find({"_id": ObjectId(id_auth)},
+    auth = Auth.find_one({"_id": ObjectId(id_auth)},
                      {'calendar_id': 1, 'condition': 1, 'sign': 1, "auth": 1, "type_auth": 1})
 
     if auth["type_auth"] == "freeBusy":
@@ -565,12 +571,33 @@ def user_to_group_cal(user, calendar):
     return good_group
 
 
+def existAnotherAuth(auth):
+    sameType = True
+    if len(auth) == 1:
+        return auth
+    type_zero = auth[0]["type_auth"]
+    for a in auth:
+        if a["type_auth"] != type_zero:
+            sameType = False
+    if sameType:
+        res = Auth.find_one({"sign": "-"})
+        print(res)
+    #casi con insieme:
+    #Se any + e type -, fai le due intersezioni e le tratti come robe separate
+    #Se type + e event -, stessa cosa
+    #Se type + e any -, prevale any -
+    #Se event + e any -, prevale any -
+
 def evaluate_auth(auth):
     # N.B: se len == 1 e segno = +
     # [id_gruppo, id_auth1], [id_gruppo, id_auth2] ... []
+    candidate = []
+    for i in auth:
+        candidate.append(Auth.find_one({"_id": ObjectId(i[1])}))
+    existAnotherAuth(candidate)
     if len(auth) == 1:
         return auth
-    return auth
+    return []
 
 
 @post("/event_vis")
@@ -588,11 +615,12 @@ def vis():
         return json_util.dumps(event_owner_cal)
 
     group_auth = user_to_group_cal(query['id'], query['calendar'])
+    #if group_auth == None -- possono non esserci auth o possono esserci, ma devi trovarle in gerarchia
     if group_auth is not None:
         winning_auth = evaluate_auth(group_auth)
         if len(winning_auth) != 0:
-            events = authorization_filter(winning_auth[0][1], query['calendar'])
-            result = Group.find_one({"_id": ObjectId(winning_auth[0][0])}, {"Precondition": 1, "_id": 0})
+            events = authorization_filter(winning_auth[1], query['calendar'])
+            result = Group.find_one({"_id": ObjectId(winning_auth[0])}, {"Precondition": 1, "_id": 0})
             eventi = precond(result['Precondition'], events, query['calendar'])
             print(eventi)
             return json_util.dumps(eventi)
