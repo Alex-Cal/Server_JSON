@@ -617,6 +617,16 @@ def user_to_group(user):
     return g
 
 
+def solve_conflict(group_auth, calendar):
+    # Se esiste solo una auth, restituisci quella, altrimenti, risolvi conflitto
+    if group_auth is None:
+        return []
+    elif len(group_auth["Authorization"]) == 1:
+        return group_auth
+    else:
+        return group_auth
+
+
 def getVisibileEventsWithHier(user, calendar):
     # otteniamo proprietario del calendario e la sua relativa gerarchia
     owner_Cal = Cal.find_one({"_id": ObjectId(calendar)}, {"_id": 0, "owner": 1})
@@ -632,14 +642,14 @@ def getVisibileEventsWithHier(user, calendar):
     # salviamo le autorizzazioni del gruppo più vicino all'utente e risolviamo conflitti, se ne esistono
     auth_for_group = Group.find_one({"name": n, "creator": owner_Cal["owner"]},
                                     {"_id": 0, "Authorization": 1})
-    groups_auth.append((auth_for_group, calendar))
+    groups_auth.append((solve_conflict(auth_for_group, calendar)))
     while n != "ANY":
         for node in G.successors(n):
             n = node
             # salviamo le autorizzazioni dei gruppi più alti in gerarchia e risolviamo conflitti, se ne esistono
             auth_for_group = Group.find_one({"name": node, "creator": owner_Cal["owner"]},
                                             {"_id": 0, "Authorization": 1})
-            groups_auth.append((auth_for_group, calendar))
+            groups_auth.append((solve_conflict(auth_for_group, calendar)))
     no_event = True
     for item in groups_auth:
         if len(item) != 0:
@@ -650,25 +660,29 @@ def getVisibileEventsWithHier(user, calendar):
 
     events = []
     events_evaluated = []
+    events_group = []
     # analizza tutti i segni delle autorizzazioni, per capire se sono concordi o discordi
-    for auth in reversed(groups_auth):
+    for auth in groups_auth:
         if len(auth) != 0:
+            events_group = []
             [positive_sign, negative_sign] = checkSign(auth["Authorization"])
-            print("Segno positivo?", positive_sign, auth["Authorization"])
             for a in (auth["Authorization"]):
-                events.append(authorization_filter(a, calendar))
+                events_group.append(authorization_filter(a, calendar))
+
             # if same sign = union; else, intersection
-            if len(events_evaluated) == 0:
-                events_evaluated = create_set_union(events)
-            elif len(events_evaluated) != 0 and len(events) == 0:
-                events_evaluated = create_set_intersect(events)
+            if positive_sign:
+                events_evaluated.append((create_set_union(events_group), "+"))
             else:
-                if positive_sign:
-                    events_evaluated = create_set_union(events)
-                else:
-                    events_evaluated = create_set_intersect(events)
-    print(events_evaluated)
-    return events_evaluated
+                events_evaluated.append((create_set_intersect(events_group), "-"))
+
+    result = []
+    for i in range(0, len(events_evaluated)-1, 1):
+        list_temp = [events_evaluated[i][0], events_evaluated[i + 1][0]]
+        if events_evaluated[i][1] == "+":
+            result = create_set_union(list_temp)
+        else:
+            result = create_set_intersect(list_temp)
+    return result
 
     # Recuperiamo tutti i gruppi fino ad ANY, da G
     # Ottenuti tutti i gruppi, è necessario recuperare tutte le autorizzazioni associate a ogni gruppo
