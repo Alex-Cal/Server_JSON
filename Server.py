@@ -100,9 +100,9 @@ def update_events():
     myquery = {"_id": (query['_id'])}
     eventToUpdate = Event.find_one(myquery)
     # caso delegato e admin delegato da gestire
-    if Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["username"]}) or \
-            search_auth_write(getAuthforUser(query['username'], query["calendar"]), eventToUpdate["_id"],
-                              eventToUpdate["type"]):
+    if Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["username"]}):  # or \
+        # search_auth_write(getAuthforUser(query['username'], query["calendar"]), eventToUpdate["_id"],
+        #                 eventToUpdate["type"]):
         Event.delete_one(myquery)
         query.pop('username')
         Event.insert_one(query)
@@ -617,64 +617,62 @@ def user_to_group(user):
     return g
 
 
-# in caso di utente appartente a più gruppi che agiscono sullo stesso calendario, restutisco l'ID del gruppo più vicino in gerarchia
-def getAuthforUser(user, calendar):
-    print("Autorizzazioni per il gruppo associato all'utente\n")
-    validAuth = []
-    groups = user_to_group(user)
-    for group in groups:
-        res = Auth.find({"group_id": str(group), "calendar_id": calendar}, {"_id": 1})
-        for auth in res:
-            validAuth.append((group, auth["_id"]))
-    return validAuth
-
-
-def solve_conflict(group_auth, calendar):
-    # Se esiste solo una auth, restituisci quella, altrimenti, risolvi conflitto
-    if group_auth is None:
-        print("Non esisto autorizzazioni")
-        return []
-    elif len(group_auth) == 1:
-        print("Solo una auth")
-        return group_auth
-    else:
-        print("Risoluzione conflitto per il gruppo", group_auth, " per il calendario ", calendar)
-
-
 def getVisibileEventsWithHier(user, calendar):
+    # otteniamo proprietario del calendario e la sua relativa gerarchia
     owner_Cal = Cal.find_one({"_id": ObjectId(calendar)}, {"_id": 0, "owner": 1})
     G = getG(owner_Cal["owner"])
-    print("Autorizzazioni per salire in gerarchia")
+    # otteniamo la lista dei gruppi a cui l'utente appartiene
     g_id = (user_to_group(user))
     for group in g_id:
         group_name = Group.find_one({"_id": group}, {"_id": 0, "name": 1})
     n = group_name["name"]
+    # ciclichiamo sul grafo alla ricerca di altre autorizzazioni, che verranno ereditate, partendo dal gruppo più
+    # vicino all'utente
     groups_auth = []
+    # salviamo le autorizzazioni del gruppo più vicino all'utente e risolviamo conflitti, se ne esistono
+    auth_for_group = Group.find_one({"name": n, "creator": owner_Cal["owner"]},
+                                    {"_id": 0, "Authorization": 1})
+    groups_auth.append((auth_for_group, calendar))
     while n != "ANY":
         for node in G.successors(n):
-            print(node)
             n = node
-            # Recuperiamo tutte le autorizzazioni associate al gruppo node, se esiste un conflitto, lo risolviamo già qui
-            # Avremo
+            # salviamo le autorizzazioni dei gruppi più alti in gerarchia e risolviamo conflitti, se ne esistono
             auth_for_group = Group.find_one({"name": node, "creator": owner_Cal["owner"]},
                                             {"_id": 0, "Authorization": 1})
-            print(group_id)
-            groups_auth.append((node, solve_conflict(auth_for_group, calendar)))
-    print("Avremo la lista degli eventi ora")
-    print(groups_auth)
+            groups_auth.append((auth_for_group, calendar))
     no_event = True
     for item in groups_auth:
-        if len(item[1]) != 0:
+        if len(item) != 0:
             no_event = False
+    # Se non esistono eventi visualizzabili, ritorna lista vuota
     if no_event:
         return []
 
+    events = []
+    events_evaluated = []
+    # analizza tutti i segni delle autorizzazioni, per capire se sono concordi o discordi
+    for auth in reversed(groups_auth):
+        if len(auth) != 0:
+            [positive_sign, negative_sign] = checkSign(auth["Authorization"])
+            print("Segno positivo?", positive_sign, auth["Authorization"])
+            for a in (auth["Authorization"]):
+                events.append(authorization_filter(a, calendar))
+            # if same sign = union; else, intersection
+            if len(events_evaluated) == 0:
+                events_evaluated = create_set_union(events)
+            elif len(events_evaluated) != 0 and len(events) == 0:
+                events_evaluated = create_set_intersect(events)
+            else:
+                if positive_sign:
+                    events_evaluated = create_set_union(events)
+                else:
+                    events_evaluated = create_set_intersect(events)
+    print(events_evaluated)
+    return events_evaluated
+
     # Recuperiamo tutti i gruppi fino ad ANY, da G
     # Ottenuti tutti i gruppi, è necessario recuperare tutte le autorizzazioni associate a ogni gruppo
-    # Partendo dall'alto, chiamiamo authorization_filter(Auth_i, calendar)
-    # Avremo un qualcosa simile ad una lista di set()
     # Salviamo, quindi, tutti gli eventi visibili, autorizzazioni per autorizzazione e, volta per volta, a seconda del tipo/segno uniamo o sottraiamo gli eventi
-
 
 
 def isInList(list, element):
@@ -718,14 +716,14 @@ def checkSign(auth):
     first_positive_sign = "+"
     first_negative_sign = "-"
     for a in auth:
-        auth_ = Auth.find_one({"_id": a[1]}, {"_id": 0, "sign": 1})
+        auth_ = Auth.find_one({"_id": a}, {"_id": 0, "sign": 1})
         if auth_["sign"] != first_positive_sign:
             positive_sign = False
         if auth_["sign"] != first_negative_sign:
             negative_sign = False
     return [positive_sign, negative_sign]
 
-#TODO Gestire autorizzazioni che arrivano dalla gerarchia, più auth su più gruppi, se utente appartiene a più gruppi
+
 @post("/event_vis")
 def vis():
     event_owner_cal = []
@@ -741,34 +739,20 @@ def vis():
         return json_util.dumps(event_owner_cal)
 
     # Possono esserci più auth, su più gruppi
+    user_group = user_to_group(query["id"])
     events = getVisibileEventsWithHier(query['id'], query['calendar'])
-    if len(events) == 0:
-        print("La gerarchia non prevede alcuna auth")
-        group_auth = getAuthforUser(query['id'], query['calendar'])
-    else:
-        print("Valuto gerarchia e produco eventi")
-
-    if group_auth is not None:
-        events = []
-        [positive_sign, negative_sign] = checkSign(group_auth)
-        print("Stesso segno + ?", positive_sign)
-        print("Stesso segno - ?", negative_sign)
-        for auth in group_auth:
-            events.append(authorization_filter(auth[1], query['calendar']))
-        # if same sign = union; else, intersection
-        if positive_sign:
-            events_evaluated = create_set_union(events)
+    result = []
+    if len(events) != 0:
+        if len(user_group) == 1:
+            result = Group.find_one({"_id": user_group[0]}, {"Precondition": 1, "_id": 0})
+            events = precond(result['Precondition'], events, query['calendar'])
         else:
-            events_evaluated = create_set_intersect(events)
-        result = Group.find_one({"_id": auth[0]}, {"Precondition": 1, "_id": 0})
-        event_to_show = precond(result['Precondition'], events_evaluated, query['calendar'])
-        # print(event_to_show)
-        return json_util.dumps(event_to_show)
+            for group in user_group:
+                result = Group.find_one({"_id": group}, {"Precondition": 1, "_id": 0})
+                events = precond(result['Precondition'], events, query['calendar'])
+        return json_util.dumps(events)
     else:
-        print("No auth")
-        # group auth è none, ma potrebbero esistere altre autorizzazioni in gerarchia
-
-    return []
+        return []
 
 
 app.install(EnableCors())
