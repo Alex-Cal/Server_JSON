@@ -1,0 +1,7 @@
+ - Controllare le AUTORIZZAZIONI AMMINISTRATIVE
+ - Calendario ESCLUSIVO e NON_ESCLUSIVO
+ - Visulizzazione e operazione di creazione e modifica per i delegati, in base a quello che possono fare (controllare cosa possono fare in base al fatto che siano DELEGATO_ROOT e DELEGATO_ADMIN)
+ - Controllare, eventualmente le operazioni utilitarie che mancano
+ - Comincia a immaginare i clash 
+ 
+ Quando hai fatto qualche punto, N.B marca le cose sull'elenco puntato. 
