@@ -99,6 +99,7 @@ def update_events():
     query = get_query_new(request.body.read().decode('utf-8'))
     query['_id'] = ObjectId(query['_id'])
     myquery = {"_id": (query['_id'])}
+    event_mod = []
     eventToUpdate = Event.find_one(myquery)
 
     #chiamando eventUserCanWrite con id utente e calendario, questo ti restituisce una lista degli eventi modificabili (N.B. nel caso, fai un dumps)
@@ -106,9 +107,14 @@ def update_events():
     # N.B. Check se sei delegato/owner
 
     # caso delegato e admin delegato da gestire
-    if Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["username"]}):  # or \
-        # search_auth_write(getAuthforUser(query['username'], query["calendar"]), eventToUpdate["_id"],
-        #                 eventToUpdate["type"]):
+    event_user_can_update = eventUserCanWrite(query["username"], query["calendar"])
+    print(event_user_can_update)
+    present = False
+    for item in event_user_can_update:
+        if item["_id"] == query["_id"]:
+            present = True
+
+    if Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["username"]}) or present:
         Event.delete_one(myquery)
         query.pop('username')
         Event.insert_one(query)
@@ -799,7 +805,15 @@ def getAllAuth():
 def deleteAuth():
     query = get_query_new(request.body.read().decode('utf-8'))
     myquery = {"_id": ObjectId(query['auth_id'])}
+    ris = Auth.find_one(myquery, {"calendar_id": 1, "group_id": 1})
     res = Auth.delete_one(myquery)
+    newvalues = {"$pull": {'Authorization': ris["_id"]}}
+    test = Cal.find_one({"_id": ObjectId(ris["calendar_id"])})
+    Cal.update_one({"_id": ObjectId(ris["calendar_id"])}, newvalues)
+    if User.find_one({"_id": ObjectId(ris["group_id"])}) is None:
+        Group.update_one({"_id": ObjectId(ris["group_id"])}, newvalues)
+    else:
+        User.update_one({"_id": ObjectId(ris["group_id"])}, newvalues)
     res.deleted_count
     if res.deleted_count != 1:
         return "Errore nella cancellazione"
@@ -820,7 +834,14 @@ def getAllPre():
 def deletePre():
     query = get_query_new(request.body.read().decode('utf-8'))
     myquery = {"_id": ObjectId(query['pre_id'])}
+    ris = Precondition.find_one(myquery, {"calendar_id": 1, "group_id": 1})
     res = Precondition.delete_one(myquery)
+    newvalues = {"$pull": {'Precondition': ris["_id"]}}
+    Cal.update_one({"_id": ObjectId(ris["calendar_id"])}, newvalues)
+    if User.find_one({"_id": ObjectId(ris["group_id"])}) is None:
+        Group.update_one({"_id": ObjectId(ris["group_id"])}, newvalues)
+    else:
+        User.update_one({"_id": ObjectId(ris["group_id"])}, newvalues)
     res.deleted_count
     if res.deleted_count != 1:
         return "Errore nella cancellazione"
