@@ -3,5 +3,6 @@
  - Visulizzazione e operazione di creazione e modifica per i delegati, in base a quello che possono fare (controllare cosa possono fare in base al fatto che siano DELEGATO_ROOT e DELEGATO_ADMIN)
  - Controllare, eventualmente le operazioni utilitarie che mancano
  - Comincia a immaginare i clash 
+ - Timeslot in vis_precond rimane numero di merda, aggiustalo
  
  Quando hai fatto qualche punto, N.B marca le cose sull'elenco puntato. 
