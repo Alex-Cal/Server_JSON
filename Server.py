@@ -93,12 +93,18 @@ def cal_event():
 
 
 # modify a given event title
+# modifica con il codice di sotto (userCanWrite)
 @post('/mod_event')
 def update_events():
     query = get_query_new(request.body.read().decode('utf-8'))
     query['_id'] = ObjectId(query['_id'])
     myquery = {"_id": (query['_id'])}
     eventToUpdate = Event.find_one(myquery)
+
+    #chiamando eventUserCanWrite con id utente e calendario, questo ti restituisce una lista degli eventi modificabili (N.B. nel caso, fai un dumps)
+    # se l'evento che voglio modificare è presente in questa lista happy
+    # N.B. Check se sei delegato/owner
+
     # caso delegato e admin delegato da gestire
     if Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["username"]}):  # or \
         # search_auth_write(getAuthforUser(query['username'], query["calendar"]), eventToUpdate["_id"],
@@ -543,13 +549,13 @@ def manage_conflict_auth(autorizzazioni):
     print(auth)
 
 
-# TODO conflitto
 def authorization_filter(id_auth, calendario):
     eventi_good = []
     flag = False
     auth = Auth.find_one({"_id": ObjectId(id_auth)},
                          {'calendar_id': 1, 'condition': 1, 'sign': 1, "auth": 1, "type_auth": 1})
-
+    if auth is None:
+        return []
     if auth["type_auth"] == "freeBusy":
         eventi = Event.find({'calendar': calendario}, {"title": 1, "start": 1, "end": 1, "allDay": 1, "color": 1})
         flag = True
@@ -572,14 +578,17 @@ def authorization_filter(id_auth, calendario):
                     eventi_good.append(item)
             else:
                 if auth['sign'] == '-':
+                    if auth["type_auth"] == "write":
+                        return []
                     eventi_good.append(item)
-
         elif auth["auth"] == "evento":
             if item['_id'] == ObjectId(auth['condition']):
                 if auth['sign'] == '+':
                     eventi_good.append(item)
             else:
                 if auth['sign'] == '-':
+                    if auth["type_auth"] == "write":
+                        return []
                     eventi_good.append(item)
     return eventi_good
 
@@ -617,17 +626,34 @@ def user_to_group(user):
     return g
 
 
-def solve_conflict(group_auth, calendar):
+def solve_conflict(group_auth, calendar, type):
     # Se esiste solo una auth, restituisci quella, altrimenti, risolvi conflitto
     if group_auth is None:
         return []
     elif len(group_auth["Authorization"]) == 1:
-        return group_auth
+        for a in group_auth["Authorization"]:
+            auth = Auth.find_one({"_id": a, "type_auth": type})
+            if auth is not None:
+                return group_auth
+        return []
     else:
-        return group_auth
+        temp_list = []
+        for a in group_auth["Authorization"]:
+            auth = Auth.find_one({"_id": a, "type_auth": type})
+            if auth is not None:
+                temp_list.append(auth["_id"])
+        if len(temp_list) == 0:
+            return []
+        dict= {"Authorization": []}
+        for item in temp_list:
+            dict["Authorization"].append(item)
+        return dict
 
 
-def getVisibileEventsWithHier(user, calendar):
+def getVisibileEventsWithHier(user, calendar, function_scope):
+    authorization_type_to_find = "write"
+    if function_scope == "show":
+        authorization_type_to_find = "read"
     # otteniamo proprietario del calendario e la sua relativa gerarchia
     owner_Cal = Cal.find_one({"_id": ObjectId(calendar)}, {"_id": 0, "owner": 1})
     G = getG(owner_Cal["owner"])
@@ -642,14 +668,14 @@ def getVisibileEventsWithHier(user, calendar):
     # salviamo le autorizzazioni del gruppo più vicino all'utente e risolviamo conflitti, se ne esistono
     auth_for_group = Group.find_one({"name": n, "creator": owner_Cal["owner"]},
                                     {"_id": 0, "Authorization": 1})
-    groups_auth.append((solve_conflict(auth_for_group, calendar)))
+    groups_auth.append((solve_conflict(auth_for_group, calendar, authorization_type_to_find)))
     while n != "ANY":
         for node in G.successors(n):
             n = node
             # salviamo le autorizzazioni dei gruppi più alti in gerarchia e risolviamo conflitti, se ne esistono
             auth_for_group = Group.find_one({"name": node, "creator": owner_Cal["owner"]},
                                             {"_id": 0, "Authorization": 1})
-            groups_auth.append((solve_conflict(auth_for_group, calendar)))
+            groups_auth.append((solve_conflict(auth_for_group, calendar, authorization_type_to_find)))
     no_event = True
     for item in groups_auth:
         if len(item) != 0:
@@ -662,13 +688,14 @@ def getVisibileEventsWithHier(user, calendar):
     events_evaluated = []
     events_group = []
     # analizza tutti i segni delle autorizzazioni, per capire se sono concordi o discordi
+    print(groups_auth)
     for auth in groups_auth:
         if len(auth) != 0:
             events_group = []
             [positive_sign, negative_sign] = checkSign(auth["Authorization"])
             for a in (auth["Authorization"]):
                 events_group.append(authorization_filter(a, calendar))
-
+            print(events_group)
             # if same sign = union; else, intersection
             if positive_sign:
                 events_evaluated.append((create_set_union(events_group), "+"))
@@ -676,13 +703,14 @@ def getVisibileEventsWithHier(user, calendar):
                 events_evaluated.append((create_set_intersect(events_group), "-"))
 
     result = []
-    for i in range(0, len(events_evaluated)-1, 1):
+    for i in range(0, len(events_evaluated) - 1, 1):
         list_temp = [events_evaluated[i][0], events_evaluated[i + 1][0]]
         if events_evaluated[i][1] == "+":
             result = create_set_union(list_temp)
         else:
             result = create_set_intersect(list_temp)
-    return result
+        return result
+    return events_evaluated[0][0]
 
     # Recuperiamo tutti i gruppi fino ad ANY, da G
     # Ottenuti tutti i gruppi, è necessario recuperare tutte le autorizzazioni associate a ogni gruppo
@@ -738,6 +766,67 @@ def checkSign(auth):
     return [positive_sign, negative_sign]
 
 
+# Return the list of event, for the calendar CALENDAR that the user can update
+# Who calls this func, must check if the user is the creator of the event, in that case, he can update everything
+def eventUserCanWrite(user, calendar):
+    user_group = user_to_group(user)
+    events = getVisibileEventsWithHier(user, calendar, "update")
+    result = []
+    if len(events) != 0:
+        if len(user_group) == 1:
+            result = Group.find_one({"_id": user_group[0]}, {"Precondition": 1, "_id": 0})
+            events = precond(result['Precondition'], events, calendar)
+        else:
+            for group in user_group:
+                result = Group.find_one({"_id": group}, {"Precondition": 1, "_id": 0})
+                events = precond(result['Precondition'], events, calendar)
+        return events
+    else:
+        return []
+
+
+@post("/list_auth")
+def getAllAuth():
+    query = get_query_new(request.body.read().decode('utf-8'))
+    res = Auth.find({"creator": query["id"]})
+    list_auth = []
+    for item in res:
+        list_auth.append(item)
+    return json_util.dumps(list_auth)
+
+#to update all references
+@post("/delete_auth")
+def deleteAuth():
+    query = get_query_new(request.body.read().decode('utf-8'))
+    myquery = {"_id": ObjectId(query['auth_id'])}
+    res = Auth.delete_one(myquery)
+    res.deleted_count
+    if res.deleted_count != 1:
+        return "Errore nella cancellazione"
+    return "Cancellazione completata con successo"
+
+
+@post("/list_pre")
+def getAllPre():
+    query = get_query_new(request.body.read().decode('utf-8'))
+    res = Precondition.find({"creator": query["id"]})
+    list_pre = []
+    for item in res:
+        list_pre.append(item)
+    return json_util.dumps(list_pre)
+
+#to update all references
+@post("/delete_pre")
+def deletePre():
+    query = get_query_new(request.body.read().decode('utf-8'))
+    myquery = {"_id": ObjectId(query['pre_id'])}
+    res = Precondition.delete_one(myquery)
+    res.deleted_count
+    if res.deleted_count != 1:
+        return "Errore nella cancellazione"
+    return "Cancellazione completata con successo"
+
+
 @post("/event_vis")
 def vis():
     event_owner_cal = []
@@ -754,7 +843,10 @@ def vis():
 
     # Possono esserci più auth, su più gruppi
     user_group = user_to_group(query["id"])
-    events = getVisibileEventsWithHier(query['id'], query['calendar'])
+    events = getVisibileEventsWithHier(query['id'], query['calendar'], "show")
+   # print("User can write: ", eventUserCanWrite(query["id"], query["calendar"]))
+    events_writable = eventUserCanWrite(query["id"], query["calendar"])
+
     result = []
     if len(events) != 0:
         if len(user_group) == 1:
@@ -764,7 +856,11 @@ def vis():
             for group in user_group:
                 result = Group.find_one({"_id": group}, {"Precondition": 1, "_id": 0})
                 events = precond(result['Precondition'], events, query['calendar'])
-        return json_util.dumps(events)
+        list = []
+        list.append(events)
+        list.append(events_writable)
+        final = create_set_union(list)
+        return json_util.dumps(final)
     else:
         return []
 
