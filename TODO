@@ -6,5 +6,8 @@
  - Timeslot in vis_precond rimane numero di merda, aggiustalo
  - Controllare se funziona tutta la roba con gerarchia o meno con il freeBusy
  - Controllare se due gruppi sono allo stesso livello, cosa fa, quindi se gerarchicamente nessuno domina nessuno.
+ - Se nodo padre può accedere al calendario X e non esiste una auth. esplicita per il figlio, non compare il nome del calendario nell'elenco
+ - Freebusy non funziona
+ 
  
  Quando hai fatto qualche punto, N.B marca le cose sull'elenco puntato. 
