@@ -27,7 +27,7 @@ AMICI_INTIMI  NUOVO
 Con le seguenti auth: 
 Amici intimi, +, su evento TEST in read
 Nuovo, -, su evento TEST in read
-Utente: vede TEST
+Utente: non vede TEST, ma potrebbe rompere le palle se sopra c'è una auth di tipo freeBusy (non facciamo capitare casi strani)
  
  - Se nodo padre può accedere al calendario X e non esiste una auth. esplicita per il figlio, non compare il nome del calendario nell'elenco ---- FATTO 
  
