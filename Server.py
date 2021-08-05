@@ -102,7 +102,7 @@ def update_events():
     event_mod = []
     eventToUpdate = Event.find_one(myquery)
 
-    #chiamando eventUserCanWrite con id utente e calendario, questo ti restituisce una lista degli eventi modificabili (N.B. nel caso, fai un dumps)
+    # chiamando eventUserCanWrite con id utente e calendario, questo ti restituisce una lista degli eventi modificabili (N.B. nel caso, fai un dumps)
     # se l'evento che voglio modificare è presente in questa lista happy
     # N.B. Check se sei delegato/owner
 
@@ -156,13 +156,19 @@ def video_image():
     return bottle.static_file((user_id + ".jpg"), root="", mimetype='image/jpg')
 
 
+def getGroupName(group_id):
+    return Group.find_one({"_id": ObjectId(group_id)}, {"_id": 0, "name": 1})
+
+
 @post("/user_cal")
 def user_cal():
     query = get_query_new(request.body.read().decode('utf-8'))
     list_cal = []
     list_calendar = set()
     list_group = []
+    groups_hier = []
     res = Cal.find({"owner": query['id']}, {"type": 1, "_id": 1})
+    # calendari di cui l'utente è proprietario
     for item in res:
         temp = {
             "id": str(item["_id"]),
@@ -170,23 +176,53 @@ def user_cal():
         }
         list_cal.append(temp)
 
+    # calendari per cui l'utente è delegato
+    res = Cal.find({}, {"Admin_auth": 1, "_id": 1, "type": 1})
+    for item in res:
+        for auth in item["Admin_auth"]:
+            admin_auth = Admin_Auth.find_one({"_id": ObjectId(auth)})
+            if query["id"] == admin_auth["user_id"]:
+                temp = {
+                    "id": str(item["_id"]),
+                    "type": item["type"]
+                }
+                list_cal.append(temp)
+
+    # calendari su cui l'utente ha autorizzazioni di visibilità
     ris = Group.find({}, {"_id": 1, "User": 1})
     for item in ris:
         for user in item['User']:
             if user == ObjectId(query['id']):
                 list_group.append(str(item['_id']))
-    for item in list_group:
+
+    # calendari a cui l'utente non ha accesso diretto, ma eredita l'accesso dalla gerarchia
+    for group in list_group:
+        res = Group.find({"_id": ObjectId(group)}, {"creator": 1, "name": 1})
+        for g in res:
+            G = getG(g["creator"])
+            n = getGroupName(group)["name"]
+            while n != "ANY":
+                for node in G.successors(n):
+                    n = node
+                    group_find = Group.find_one({"name": node, "creator": g["creator"]}, {"_id": 1})
+                    if group_find is not None:
+                        groups_hier.append(str(group_find["_id"]))
+
+    complete_groups = groups_hier + list_group
+
+    for item in complete_groups:
         result = Auth.find({"group_id": item}, {"calendar_id": 1})
         for cal in result:
             list_calendar.add(cal['calendar_id'])
+
     for cal in list_calendar:
         res = Cal.find({"_id": ObjectId(cal)}, {"type": 1, "_id": 1})
         temp = {
             "id": str(res[0]["_id"]),
             "type": res[0]["type"]
         }
-        list_cal.append(temp)
-
+        if not isInList(list_cal, temp, "id", "id"):
+            list_cal.append(temp)
     return json_util.dumps(list_cal)
 
 
@@ -408,16 +444,31 @@ def insert_precondition():
 
 @post('/auth_admin')
 def insert_admin_auth():
-    query = get_query(request.body.read().decode('utf-8'))
-    myquery = {'_id': ObjectId(query['calendar'])}
-    myquery1 = {'_id': ObjectId(query['name'])}
-    newquery = {"user_type": "delegate"}
-    new_dict = {**query, **newquery}
-    Admin_Auth.insert_one(new_dict)
+    query = get_query_new(request.body.read().decode('utf-8'))
+    existUser = User.find_one({"username": query["username"]})
+    if existUser is None:
+        return "Utente inesistente"
+    if existUser["_id"] == ObjectId(query["creator"]):
+        return "Impossibile delegare l'owner"
+    print(query)
+
+    existAuth = Admin_Auth.find_one({"user_id": str(existUser["_id"]), "calendar_id": query["calendar_id"]})
+    if existAuth is not None:
+        return "È già presente una autorizzazione per questo utente, su questo calendario"
+
+
+    query.pop('username')
+    user_id = {"user_id": str(existUser["_id"])}
+    to_insert = {**query, **user_id}
+    Admin_Auth.insert_one(to_insert)
+
     res = Admin_Auth.find({}, {'_id'}).sort('_id', -1).limit(1)
     newvalues = {"$addToSet": {'Admin_auth': ObjectId(res[0]['_id'])}}
+    myquery = {'_id': ObjectId(query['calendar_id'])}
+    myquery1 = {'_id': existUser["_id"]}
     User.update_one(myquery1, newvalues)
     Cal.update_one(myquery, newvalues)
+    return "Autorizzazione inserita con successo"
 
 
 @post('/list_created_group')
@@ -520,7 +571,7 @@ def evaluate_rep_admin(timeslot, calendar):
 def evaluate_not_rep(timeslot, eventi):
     [start_date, start_hour, end_date, end_hour] = string_not_repetition(timeslot)
     good_event = []
-    print(eventi)
+    # print(eventi)
     for item in eventi:
         start = datetime.fromtimestamp(int(item["start"]))
         end = datetime.fromtimestamp(int(item["end"]))
@@ -547,14 +598,6 @@ def evaluate_rep(timeslot, eventi):
     return good_event
 
 
-def manage_conflict_auth(autorizzazioni):
-    auth = []
-    print(autorizzazioni)
-    for i in autorizzazioni:
-        auth.append((i['_id'], i['segno']))
-    print(auth)
-
-
 def authorization_filter(id_auth, calendario):
     eventi_good = []
     flag = False
@@ -563,7 +606,8 @@ def authorization_filter(id_auth, calendario):
     if auth is None:
         return []
     if auth["type_auth"] == "freeBusy":
-        eventi = Event.find({'calendar': calendario}, {"title": 1, "start": 1, "end": 1, "allDay": 1, "color": 1})
+        eventi = Event.find({'calendar': calendario},
+                            {"title": 1, "start": 1, "end": 1, "allDay": 1, "color": 1, "type": 1})
         flag = True
     else:
         eventi = Event.find({'calendar': calendario})
@@ -639,8 +683,13 @@ def solve_conflict(group_auth, calendar, type):
     elif len(group_auth["Authorization"]) == 1:
         for a in group_auth["Authorization"]:
             auth = Auth.find_one({"_id": a, "type_auth": type})
+            if type == "read":
+                auth_freeBusy = Auth.find_one({"_id": a, "type_auth": "freeBusy"})
+                if auth_freeBusy is not None:
+                    return group_auth
             if auth is not None:
                 return group_auth
+
         return []
     else:
         temp_list = []
@@ -648,9 +697,15 @@ def solve_conflict(group_auth, calendar, type):
             auth = Auth.find_one({"_id": a, "type_auth": type})
             if auth is not None:
                 temp_list.append(auth["_id"])
+
+            if type == "read":
+                auth_freeBusy = Auth.find_one({"_id": a, "type_auth": "freeBusy"})
+                if auth_freeBusy is not None:
+                    temp_list.append(auth_freeBusy["_id"])
+
         if len(temp_list) == 0:
             return []
-        dict= {"Authorization": []}
+        dict = {"Authorization": []}
         for item in temp_list:
             dict["Authorization"].append(item)
         return dict
@@ -690,18 +745,16 @@ def getVisibileEventsWithHier(user, calendar, function_scope):
     if no_event:
         return []
 
-    events = []
     events_evaluated = []
-    events_group = []
     # analizza tutti i segni delle autorizzazioni, per capire se sono concordi o discordi
-    print(groups_auth)
+    # print(groups_auth)
     for auth in groups_auth:
         if len(auth) != 0:
             events_group = []
             [positive_sign, negative_sign] = checkSign(auth["Authorization"])
             for a in (auth["Authorization"]):
                 events_group.append(authorization_filter(a, calendar))
-            print(events_group)
+            # print(events_group)
             # if same sign = union; else, intersection
             if positive_sign:
                 events_evaluated.append((create_set_union(events_group), "+"))
@@ -716,6 +769,7 @@ def getVisibileEventsWithHier(user, calendar, function_scope):
         else:
             result = create_set_intersect(list_temp)
         return result
+
     return events_evaluated[0][0]
 
     # Recuperiamo tutti i gruppi fino ad ANY, da G
@@ -723,9 +777,9 @@ def getVisibileEventsWithHier(user, calendar, function_scope):
     # Salviamo, quindi, tutti gli eventi visibili, autorizzazioni per autorizzazione e, volta per volta, a seconda del tipo/segno uniamo o sottraiamo gli eventi
 
 
-def isInList(list, element):
+def isInList(list, element, firstCon, secondCon):
     for el in list:
-        if el["_id"] == element["_id"]:
+        if el[firstCon] == element[secondCon]:
             return True
     return False
 
@@ -744,7 +798,7 @@ def create_set_intersect(events):
     for item in events:
         for temp_item in item:
             if isInListForIntersect(events, temp_item):
-                if not isInList(list_events, temp_item):
+                if not isInList(list_events, temp_item, "_id", "_id"):
                     list_events.append(temp_item)
     return list_events
 
@@ -753,7 +807,7 @@ def create_set_union(events):
     list_events = []
     for item in events:
         for temp_item in item:
-            if not isInList(list_events, temp_item):
+            if not isInList(list_events, temp_item, "_id", "_id"):
                 list_events.append(temp_item)
     return list_events
 
@@ -800,7 +854,8 @@ def getAllAuth():
         list_auth.append(item)
     return json_util.dumps(list_auth)
 
-#to update all references
+
+# to update all references
 @post("/delete_auth")
 def deleteAuth():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -829,7 +884,8 @@ def getAllPre():
         list_pre.append(item)
     return json_util.dumps(list_pre)
 
-#to update all references
+
+# to update all references
 @post("/delete_pre")
 def deletePre():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -848,6 +904,28 @@ def deletePre():
     return "Cancellazione completata con successo"
 
 
+def eventsADelegateCanRead(user_id, calendar_id):
+    #1. Check, is he a Delegate?
+    res = Admin_Auth.find_one({"user_id": user_id, "calendar_id": calendar_id})
+    if res is None:
+        print("Non si tratta di un delegato")
+        return[]
+    print("Hey, delegato, puoi vedere:")
+    events = Event.find({"calendar": calendar_id})
+    if events is None:
+        print("Sei un delegato, ma non ci sono eventi su questo calendario")
+        return[]
+
+    if res["repetition"] == "true":
+        timeslot = res["startDay"] + "." + res["startHour"]+":" + res["startMin"] + "-" + res["endDay"] + "." + res["endHour"]+":" + res["endMin"]
+        return evaluate_rep(timeslot, events)
+    else:
+        timeslot = res["start"]+"-" + res["end"]
+        return evaluate_not_rep(timeslot, events)
+
+
+
+# In caso di delegato, aggiungere eventi che può vedere
 @post("/event_vis")
 def vis():
     event_owner_cal = []
@@ -862,13 +940,20 @@ def vis():
             event_owner_cal.append(item)
         return json_util.dumps(event_owner_cal)
 
+    #Se si tratta di un delegato, ritorna tutti gli eventi di quel calendario
+    delegate_events = eventsADelegateCanRead(query["id"], query['calendar'])
+    if len(delegate_events) != 0:
+        return json_util.dumps(delegate_events)
+
     # Possono esserci più auth, su più gruppi
     user_group = user_to_group(query["id"])
     events = getVisibileEventsWithHier(query['id'], query['calendar'], "show")
-   # print("User can write: ", eventUserCanWrite(query["id"], query["calendar"]))
+
+    # print("User can write: ", eventUserCanWrite(query["id"], query["calendar"]))
     events_writable = eventUserCanWrite(query["id"], query["calendar"])
 
-    result = []
+
+
     if len(events) != 0:
         if len(user_group) == 1:
             result = Group.find_one({"_id": user_group[0]}, {"Precondition": 1, "_id": 0})
@@ -877,9 +962,7 @@ def vis():
             for group in user_group:
                 result = Group.find_one({"_id": group}, {"Precondition": 1, "_id": 0})
                 events = precond(result['Precondition'], events, query['calendar'])
-        list = []
-        list.append(events)
-        list.append(events_writable)
+        list = [events, events_writable]
         final = create_set_union(list)
         return json_util.dumps(final)
     else:
