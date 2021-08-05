@@ -4,14 +4,14 @@
  
  - Visulizzazione e operazione di creazione e modifica per i delegati, in base a quello che possono fare (controllare cosa possono fare in base al fatto che siano DELEGATO_ROOT e DELEGATO_ADMIN)
  = Lista dei calendari === Tiene conto del delegato (senza distinzione di ruoli) ---- FATTO 
- = Visualizza gli eventi se sei delegato, rispettando le pre/post === 
- = Modifica gli eventi in base al tipo di delegato ====
+ = Visualizza gli eventi se sei delegato, rispettando le pre/post === #TODO
+ = Modifica gli eventi in base al tipo di delegato ==== #TODO
  
  
  
- - Controllare, eventualmente le operazioni utilitarie che mancano
+ - Controllare, eventualmente le operazioni utilitarie che mancano #TODO
  
- - Comincia a immaginare i clash 
+ - Comincia a immaginare i clash  #TODO
  
  - Timeslot in vis_precond rimane numero di merda, aggiustalo ---- FATTO 
  
