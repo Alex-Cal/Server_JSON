@@ -1,13 +1,21 @@
- - Controllare le AUTORIZZAZIONI AMMINISTRATIVE
- - Calendario ESCLUSIVO e NON_ESCLUSIVO
- - Visulizzazione e operazione di creazione e modifica per i delegati, in base a quello che possono fare (controllare cosa possono fare in base al fatto che siano DELEGATO_ROOT e DELEGATO_ADMIN)
- - Controllare, eventualmente le operazioni utilitarie che mancano
- - Comincia a immaginare i clash 
- - Timeslot in vis_precond rimane numero di merda, aggiustalo
- - Controllare se funziona tutta la roba con gerarchia o meno con il freeBusy
- - Controllare se due gruppi sono allo stesso livello, cosa fa, quindi se gerarchicamente nessuno domina nessuno.
- - Se nodo padre può accedere al calendario X e non esiste una auth. esplicita per il figlio, non compare il nome del calendario nell'elenco
- - Freebusy non funziona
+ - Aggiungere le AUTORIZZAZIONI AMMINISTRATIVE ---- FATTO 
  
+ - Calendario ESCLUSIVO e NON_ESCLUSIVO ---- FATTO 
+ 
+ - Visulizzazione e operazione di creazione e modifica per i delegati, in base a quello che possono fare (controllare cosa possono fare in base al fatto che siano DELEGATO_ROOT e DELEGATO_ADMIN)
+ 
+ - Controllare, eventualmente le operazioni utilitarie che mancano
+ 
+ - Comincia a immaginare i clash 
+ 
+ - Timeslot in vis_precond rimane numero di merda, aggiustalo ---- FATTO 
+ 
+ - Controllare se funziona tutta la roba con gerarchia o meno con il freeBusy ---- FATTO 
+ 
+ - Controllare se due gruppi sono allo stesso livello, cosa fa, quindi se gerarchicamente nessuno domina nessuno.
+ 
+ - Se nodo padre può accedere al calendario X e non esiste una auth. esplicita per il figlio, non compare il nome del calendario nell'elenco
+ 
+ - Freebusy non funziona ---- FATTO 
  
  Quando hai fatto qualche punto, N.B marca le cose sull'elenco puntato. 
