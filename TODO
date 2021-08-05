@@ -14,7 +14,7 @@
  
  - Controllare se due gruppi sono allo stesso livello, cosa fa, quindi se gerarchicamente nessuno domina nessuno.
  
- - Se nodo padre può accedere al calendario X e non esiste una auth. esplicita per il figlio, non compare il nome del calendario nell'elenco
+ - Se nodo padre può accedere al calendario X e non esiste una auth. esplicita per il figlio, non compare il nome del calendario nell'elenco ---- FATTO 
  
  - Freebusy non funziona ---- FATTO 
  
