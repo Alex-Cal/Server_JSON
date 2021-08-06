@@ -105,11 +105,22 @@ def update_events():
 
     # caso delegato e admin delegato da gestire
     #1. Check - sei un delegato per il calendario X? Se no, prosegui sotto con event_user_can_update
-    delegato = False
     present = False
 
-    if delegato:
-        delegato = True
+    existAuth = Admin_Auth.find_one({"user_id": query["username"], "calendar_id": query["calendar"]})
+    if existAuth is not None:
+        
+        find_creator_event = Cal.find_one({"_id":ObjectId(query["calendar"]), "owner": eventToUpdate["creator"]})
+        if find_creator_event is not None:
+            present = False
+            
+        checkAminDel = Admin_Auth.find_one({"user_id": eventToUpdate["creator"], "calendar_id": query["calendar"]})
+        if (checkAminDel["type_delegate"] == "ADMIN" and existAuth["type_delegate"] == "ROOT") or (eventToUpdate["creator"] == query["username"]):
+            present = True
+            
+        if existAuth["type_delegate"] == "ADMIN" and eventToUpdate["creator"] == existAuth["user_id"]:
+            present = True
+            
         # Se sei un delegato del calendario X, bisogna controllare l'evento che vuoi modificare
         # Se l'evento ha come creator l'owner del calendario === fermo, non fai nulla --- present=False
         # Se l'evento ha come creator un delegato ADMIN e tu sei un delegato ROOT --- present = True e lo modifichi
