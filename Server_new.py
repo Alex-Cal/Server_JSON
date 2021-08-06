@@ -314,6 +314,7 @@ def get_query(request):
 # curl --data "title=Meeting(ProgettoA)&type=Meeting&start=1626858000&end=1626861600&color=#fff000&allDay=false&calendar=60f82761f748c26325297ab8" http://0.0.0.0:12345/insert_event
 @post('/insert_event')
 def insert_event():
+    #controllare se si tratta dell'owner o di un delegato; serve lo username dell'utente che vuole fare l'operazione
     print(request.body.read().decode('utf-8'))
     query = get_query_new(request.body.read().decode('utf-8'))
     print(query)
