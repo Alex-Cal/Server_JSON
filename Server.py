@@ -93,7 +93,7 @@ def cal_event():
 
 
 # modify a given event title
-# modifica con il codice di sotto (userCanWrite)
+
 @post('/mod_event')
 def update_events():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -102,17 +102,25 @@ def update_events():
     event_mod = []
     eventToUpdate = Event.find_one(myquery)
 
-    # chiamando eventUserCanWrite con id utente e calendario, questo ti restituisce una lista degli eventi modificabili (N.B. nel caso, fai un dumps)
-    # se l'evento che voglio modificare è presente in questa lista happy
-    # N.B. Check se sei delegato/owner
 
     # caso delegato e admin delegato da gestire
-    event_user_can_update = eventUserCanWrite(query["username"], query["calendar"])
-    print(event_user_can_update)
+    #1. Check - sei un delegato per il calendario X? Se no, prosegui sotto con event_user_can_update
+    delegato = False
     present = False
-    for item in event_user_can_update:
-        if item["_id"] == query["_id"]:
-            present = True
+
+    if delegato:
+        delegato = True
+        # Se sei un delegato del calendario X, bisogna controllare l'evento che vuoi modificare
+        # Se l'evento ha come creator l'owner del calendario === fermo, non fai nulla --- present=False
+        # Se l'evento ha come creator un delegato ADMIN e tu sei un delegato ROOT --- present = True e lo modifichi
+        # Se sei un delegato ADMIN e l'evento è stato creato da te, allora puoi modificarlo --- present = TRUE
+        # Se sei delegato ROOT e l'evento è creato da qualsiasi persona, all'infuori dell'owner --- Present = True
+    else:
+        event_user_can_update = eventUserCanWrite(query["username"], query["calendar"])
+        print(event_user_can_update)
+        for item in event_user_can_update:
+            if item["_id"] == query["_id"]:
+                present = True
 
     if Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["username"]}) or present:
         Event.delete_one(myquery)
