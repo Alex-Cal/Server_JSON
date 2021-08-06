@@ -102,7 +102,7 @@ def update_events():
     event_mod = []
     eventToUpdate = Event.find_one(myquery)
 
-
+#controllare che solo gli utenti owner e delegate possono modificare il timeslot
     # caso delegato e admin delegato da gestire
     #1. Check - sei un delegato per il calendario X? Se no, prosegui sotto con event_user_can_update
     present = False
