@@ -539,11 +539,10 @@ def string_not_repetition(timeslot):
     return [start_date_param, start_hour_param, end_date_param, end_hour_param]
 
 
-def evaluate_not_rep_admin(timeslot, calendar):
+def evaluate_not_rep_admin(timeslot, events):
     [start_date, start_hour, end_date, end_hour] = string_not_repetition(timeslot)
-    result = Event.find({"calendar": calendar})
     good_event = []
-    for item in result:
+    for item in events:
         start = datetime.fromtimestamp(int(item["start"]))
         end = datetime.fromtimestamp(int(item["end"]))
         if not (datetime.date(start) > end_date or datetime.date(end) < start_date):
@@ -552,11 +551,10 @@ def evaluate_not_rep_admin(timeslot, calendar):
     return good_event
 
 
-def evaluate_rep_admin(timeslot, calendar):
+def evaluate_rep_admin(timeslot, events):
     [start_day, start_hour, end_day, end_hour] = string_repetition(timeslot)
-    result = Event.find({"calendar": calendar})
     good_event = []
-    for item in result:
+    for item in events:
         start = datetime.fromtimestamp(int(item["start"]))
         end = datetime.fromtimestamp(int(item["end"]))
         start_hour_adm = datetime.strptime(start_hour, "%H:%M").time()
@@ -869,7 +867,6 @@ def deleteAuth():
         Group.update_one({"_id": ObjectId(ris["group_id"])}, newvalues)
     else:
         User.update_one({"_id": ObjectId(ris["group_id"])}, newvalues)
-    res.deleted_count
     if res.deleted_count != 1:
         return "Errore nella cancellazione"
     return "Cancellazione completata con successo"
@@ -883,6 +880,31 @@ def getAllPre():
     for item in res:
         list_pre.append(item)
     return json_util.dumps(list_pre)
+
+@post("/list_admin_pre")
+def getAllAdminPre():
+    query = get_query_new(request.body.read().decode('utf-8'))
+    res = Admin_Auth.find({"creator": query["id"]})
+    list_pre = []
+    for item in res:
+        user_name = User.find_one({"_id": ObjectId(item["user_id"])}, {"_id":0, "username":1})
+        item.pop("user_id")
+        result = {**item, **user_name}
+        list_pre.append(result)
+    return json_util.dumps(list_pre)
+
+@post("/delete_admin_pre")
+def deleteAdminPre():
+    query = get_query_new(request.body.read().decode('utf-8'))
+    myquery = {"_id": ObjectId(query['pre_id'])}
+    ris = Admin_Auth.find_one(myquery, {"calendar_id": 1, "user_id": 1})
+    res = Admin_Auth.delete_one(myquery)
+    newvalues = {"$pull": {'Admin_auth': ris["_id"]}}
+    Cal.update_one({"_id": ObjectId(ris["calendar_id"])}, newvalues)
+    User.update_one({"_id": ObjectId(ris["user_id"])}, newvalues)
+    if res.deleted_count != 1:
+        return "Errore nella cancellazione"
+    return "Cancellazione completata con successo"
 
 
 # to update all references
@@ -898,7 +920,6 @@ def deletePre():
         Group.update_one({"_id": ObjectId(ris["group_id"])}, newvalues)
     else:
         User.update_one({"_id": ObjectId(ris["group_id"])}, newvalues)
-    res.deleted_count
     if res.deleted_count != 1:
         return "Errore nella cancellazione"
     return "Cancellazione completata con successo"
@@ -918,10 +939,10 @@ def eventsADelegateCanRead(user_id, calendar_id):
 
     if res["repetition"] == "true":
         timeslot = res["startDay"] + "." + res["startHour"]+":" + res["startMin"] + "-" + res["endDay"] + "." + res["endHour"]+":" + res["endMin"]
-        return evaluate_rep(timeslot, events)
+        return evaluate_rep_admin(timeslot, events)
     else:
         timeslot = res["start"]+"-" + res["end"]
-        return evaluate_not_rep(timeslot, events)
+        return evaluate_not_rep_admin(timeslot, events)
 
 
 
