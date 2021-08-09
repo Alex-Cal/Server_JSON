@@ -6,8 +6,8 @@
  = Lista dei calendari === Tiene conto del delegato (senza distinzione di ruoli) ---- FATTO 
  = Visualizza gli eventi se sei delegato, rispettando le pre/post ----  FATTO
  = Modifica gli eventi in base al tipo di delegato ==== #TODO (Da provare)
- = Aggiungere concessione autorizzazioni da parte dei delegati === #TODO
- = Quando si inserisce un evento, controllare che l'utente sia un owner del cal o uno dei due tipi di delegato ===#TODO
+ = Aggiungere concessione autorizzazioni da parte dei delegati === FATTO
+ = Quando si inserisce un evento, controllare che l'utente sia un owner del cal o uno dei due tipi di delegato === FATTO
  
  - Controllare, eventualmente le operazioni utilitarie che mancano ----  FATTO
  
