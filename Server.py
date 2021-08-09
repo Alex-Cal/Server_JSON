@@ -94,40 +94,92 @@ def cal_event():
 
 # modify a given event title
 
+# Se sei un delegato del calendario X, bisogna controllare l'evento che vuoi modificare
+# Se l'evento ha come creator l'owner del calendario === fermo, non fai nulla --- present=False
+# Se l'evento ha come creator un delegato ADMIN e tu sei un delegato ROOT --- present = True e lo modifichi
+# Se sei un delegato ADMIN e l'evento è stato creato da te, allora puoi modificarlo --- present = TRUE
+# Se sei delegato ROOT e l'evento è creato da qualsiasi persona, all'infuori dell'owner --- Present = True
+
 @post('/mod_event')
 def update_events():
     query = get_query_new(request.body.read().decode('utf-8'))
     query['_id'] = ObjectId(query['_id'])
     myquery = {"_id": (query['_id'])}
-    event_mod = []
     eventToUpdate = Event.find_one(myquery)
 
+    present_delegate = False
+    present_user = False
 
-    # caso delegato e admin delegato da gestire
-    #1. Check - sei un delegato per il calendario X? Se no, prosegui sotto con event_user_can_update
-    delegato = False
-    present = False
-
-    if delegato:
-        delegato = True
-        # Se sei un delegato del calendario X, bisogna controllare l'evento che vuoi modificare
-        # Se l'evento ha come creator l'owner del calendario === fermo, non fai nulla --- present=False
-        # Se l'evento ha come creator un delegato ADMIN e tu sei un delegato ROOT --- present = True e lo modifichi
-        # Se sei un delegato ADMIN e l'evento è stato creato da te, allora puoi modificarlo --- present = TRUE
-        # Se sei delegato ROOT e l'evento è creato da qualsiasi persona, all'infuori dell'owner --- Present = True
-    else:
-        event_user_can_update = eventUserCanWrite(query["username"], query["calendar"])
-        print(event_user_can_update)
-        for item in event_user_can_update:
-            if item["_id"] == query["_id"]:
-                present = True
-
-    if Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["username"]}) or present:
-        Event.delete_one(myquery)
+    existAuth = Admin_Auth.find_one({"user_id": query["username"], "calendar_id": query["calendar"]})
+    isOwner = Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["username"]})
+    if isOwner is not None:
+        query["creator"] = query["username"]
         query.pop('username')
+        Event.delete_one(myquery)
         Event.insert_one(query)
         return "Modifica completata con successo"
+    elif existAuth is not None:
+        checkAminDel = Admin_Auth.find_one({"user_id": eventToUpdate["creator"], "calendar_id": query["calendar"]})
+        if checkAminDel is not None:
+            if (checkAminDel["level"] == "DELEGATO_ADMIN" and existAuth["level"] == "DELEGATO_ROOT") or \
+                    (eventToUpdate["creator"] == query["username"]) or \
+                    (existAuth["level"] == "DELEGATO_ADMIN" and eventToUpdate["creator"] == existAuth["user_id"]):
+                present_delegate = True
+    else:
+        event_user_can_update = eventUserCanWrite(query["username"], query["calendar"])
+        for item in event_user_can_update:
+            if item["_id"] == query["_id"]:
+                present_user = True
+
+    if present_delegate:
+        query["creator"] = query["username"]
+        query.pop('username')
+        Event.delete_one(myquery)
+        canUpdDateTime = canADelegateAccessTimeslot(query["creator"], query["calendar"], query["start"], query["end"])
+        if (query["start"] == eventToUpdate["start"] and query["end"] == eventToUpdate["end"]) or canUpdDateTime:
+            Event.insert_one(query)
+            return "Evento modificato"
+        elif not canUpdDateTime:
+            query["start"] = eventToUpdate["start"]
+            query["end"] = eventToUpdate["end"]
+            Event.insert_one(query)
+            return "Errore nella modifica, timeslot invariato"
+    elif present_user:
+        Event.delete_one(myquery)
+        query.pop('username')
+        query["start"] = eventToUpdate["start"]
+        query["end"] = eventToUpdate["end"]
+        Event.insert_one(query)
+        return "Modifica completata con successo (timeslot invariato)"
     return "Errore nella modifica"
+
+
+def canADelegateAccessTimeslot(user_id, calendar_id, start_time_to_insert, end_time_to_insert):
+    admin_pre = Admin_Auth.find_one({"user_id": user_id, "calendar_id": calendar_id})
+    if admin_pre is not None:
+        start = datetime.fromtimestamp(int(start_time_to_insert))
+        end = datetime.fromtimestamp(int(end_time_to_insert))
+        if admin_pre["repetition"] == "false":
+            timeslot = admin_pre["start"] + "-" + admin_pre["end"]
+            [start_date, start_hour, end_date, end_hour] = string_not_repetition(timeslot)
+
+
+            if (datetime.date(start)) >= start_date and (datetime.date(end)) <= end_date:
+                if datetime.time(start) >= start_hour and datetime.time(end) <= end_hour:
+                    return True
+            return False
+        else:
+            timeslot = admin_pre["startDay"] + "." + admin_pre["startHour"] + ":" + admin_pre["startMin"] + "-" + \
+                       admin_pre["endDay"] + "." + admin_pre["endHour"] + ":" + admin_pre["endMin"]
+            [start_day, start_hour, end_day, end_hour] = string_repetition(timeslot)
+
+            start_hour_adm = datetime.strptime(start_hour, "%H:%M").time()
+            end_hour_adm = datetime.strptime(end_hour, "%H:%M").time()
+            if int(datetime.weekday(start)) >= int(start_day) and int(datetime.weekday(end)) <= int(end_day):
+                if datetime.time(start) >= start_hour_adm and datetime.time(end) <= end_hour_adm:
+                    return True
+        return False
+    return False
 
 
 # N.B. gestire auth più specifica e conflitto e delegato
@@ -279,38 +331,34 @@ def get_query_new(r):
     return create_query(pair)
 
 
-def get_query(request):
-    pair = []
-    equal_list = []
-    dollar_list = []
-    for item in re.finditer('&', request):
-        dollar_list.append(item.start())
-
-    for item in re.finditer('=', request):
-        equal_list.append(item.start())
-
-    if len(dollar_list) == 0:
-        pair.append(((request[0:equal_list[0]]), request[equal_list[0] + 1:len(request)]))
-        return create_query(pair)
-    pair.append(((request[0:equal_list[0]]), request[equal_list[0] + 1:dollar_list[0]]))
-    for i in range(0, len(dollar_list) - 1):
-        pair.append((request[dollar_list[i] + 1:equal_list[i + 1]], request[equal_list[i + 1] + 1:dollar_list[i + 1]]))
-    pair.append((request[dollar_list[len(dollar_list) - 1] + 1:equal_list[len(dollar_list)]],
-                 request[equal_list[len(dollar_list)] + 1:len(request)]))
-    return create_query(pair)
-
-
-# curl --data "title=Meeting(ProgettoA)&type=Meeting&start=1626858000&end=1626861600&color=#fff000&allDay=false&calendar=60f82761f748c26325297ab8" http://0.0.0.0:12345/insert_event
 @post('/insert_event')
 def insert_event():
-    print(request.body.read().decode('utf-8'))
+    # controllare se si tratta dell'owner o di un delegato; serve lo username dell'utente che vuole fare l'operazione
     query = get_query_new(request.body.read().decode('utf-8'))
     print(query)
-    Event.insert_one(query)
-    myquery = {'_id': ObjectId(query['calendar'])}
-    res = Event.find({}, {'_id'}).sort('_id', -1).limit(1)
-    newvalues = {"$addToSet": {'Events': ObjectId(res[0]['_id'])}}
-    Cal.update_one(myquery, newvalues)
+    isOwner = Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["creator"]})
+    if isOwner is not None:
+        Event.insert_one(query)
+        myquery = {'_id': ObjectId(query['calendar'])}
+        res = Event.find({}, {'_id'}).sort('_id', -1).limit(1)
+        newvalues = {"$addToSet": {'Events': ObjectId(res[0]['_id'])}}
+        Cal.update_one(myquery, newvalues)
+        return "Inserimento completato con successo (owner del calendario)"
+    existAuth = Admin_Auth.find_one({"user_id": query["creator"], "calendar_id": query["calendar"]})
+    if existAuth is not None:
+        isAble =canADelegateAccessTimeslot(query["creator"], query["calendar"], query["start"], query["end"])
+        if isAble:
+            Event.insert_one(query)
+            myquery = {'_id': ObjectId(query['calendar'])}
+            res = Event.find({}, {'_id'}).sort('_id', -1).limit(1)
+            newvalues = {"$addToSet": {'Events': ObjectId(res[0]['_id'])}}
+            Cal.update_one(myquery, newvalues)
+            return "Inserimento completato con successo (delegato e giusto intervallo)"
+        else:
+            return "Errore nell'inserimento, timeslot a te non disponibile"
+    return "Errore nell'inserimento"
+
+
 
 
 # curl --data "type=School&owner=Alex" http://0.0.0.0:12345/insert_cal
@@ -407,6 +455,11 @@ def insert_auth():
     print(query)
     myquery = {'_id': ObjectId(query['calendar_id'])}
     myquery2 = {'_id': ObjectId(query['group_id'])}
+    isDelegate = Admin_Auth.find_one({"user_id": query["creator"], "calendar_id": query["calendar_id"]})
+    if isDelegate is not None:
+        if isDelegate["level"] == "DELEGATO_ADMIN" and query["type_auth"] == "write":
+            return "Impossibile inserire l'autorizzazione"
+
     Auth.insert_one(query)
     res = Auth.find({}, {'_id'}).sort('_id', -1).limit(1)
     newvalues = {"$addToSet": {'Authorization': ObjectId(res[0]['_id'])}}
@@ -417,6 +470,16 @@ def insert_auth():
     Cal.update_one(myquery, newvalues)
     return "Autorizzazione inserita con successo"
 
+
+@post('/calendar_delegate')
+def calendar_delegate():
+    query = get_query_new(request.body.read().decode('utf-8'))
+    res = Admin_Auth.find({"user_id": query["id"]}, {"calendar_id": 1})
+    calend = []
+    for calendar in res:
+        cal = Cal.find_one({"_id": ObjectId(calendar["calendar_id"])}, {"_id": 1, "type": 1})
+        calend.append(cal)
+    return json_util.dumps(calend)
 
 @post('/precondition')
 def insert_precondition():
@@ -464,7 +527,6 @@ def insert_admin_auth():
     if existAuth is not None:
         return "È già presente una autorizzazione per questo utente, su questo calendario"
 
-
     query.pop('username')
     user_id = {"user_id": str(existUser["_id"])}
     to_insert = {**query, **user_id}
@@ -510,14 +572,14 @@ def insert_user_group():
     return "Utente inserito correttamente nel gruppo"
 
 
-@post("/group_id")
-def group_id():
-    query = get_query(request.body.read().decode('utf-8'))
-    lista = []
-    res = Group.find({"name": query['name']}, {"_id": 1, "name": 1})
-    for item in res:
-        lista.append(str(item["_id"]) + "-" + item["name"])
-    return lista
+# @post("/group_id")
+# def group_id():
+#     query = get_query_new(request.body.read().decode('utf-8'))
+#     lista = []
+#     res = Group.find({"name": query['name']}, {"_id": 1, "name": 1})
+#     for item in res:
+#         lista.append(str(item["_id"]) + "-" + item["name"])
+#     return lista
 
 
 def string_repetition(timeslot):
@@ -553,8 +615,8 @@ def evaluate_not_rep_admin(timeslot, events):
     for item in events:
         start = datetime.fromtimestamp(int(item["start"]))
         end = datetime.fromtimestamp(int(item["end"]))
-        if not (datetime.date(start) > end_date or datetime.date(end) < start_date):
-            if not (datetime.time(start) > end_hour or datetime.time(end) < start_hour):
+        if (datetime.date(start)) >= start_date and (datetime.date(end)) <= end_date:
+            if datetime.time(start) >= start_hour and datetime.time(end) <= end_hour:
                 good_event.append(item)
     return good_event
 
@@ -567,8 +629,8 @@ def evaluate_rep_admin(timeslot, events):
         end = datetime.fromtimestamp(int(item["end"]))
         start_hour_adm = datetime.strptime(start_hour, "%H:%M").time()
         end_hour_adm = datetime.strptime(end_hour, "%H:%M").time()
-        if not (int(datetime.weekday(start)) > int(end_day) or int(datetime.weekday(end)) < int(start_day)):
-            if not (datetime.time(start) > end_hour_adm or datetime.time(end) < start_hour_adm):
+        if int(datetime.weekday(start)) >= int(start_day) and int(datetime.weekday(end)) <= int(end_day):
+            if datetime.time(start) >= start_hour_adm and datetime.time(end) <= end_hour_adm:
                 good_event.append(item)
     return good_event
 
@@ -613,7 +675,7 @@ def authorization_filter(id_auth, calendario):
         return []
     if auth["type_auth"] == "freeBusy":
         eventi = Event.find({'calendar': calendario},
-                            {"title": 1, "start": 1, "end": 1, "allDay": 1, "color": 1, "type": 1})
+                            {"calendar": 1, "title": 1, "start": 1, "end": 1, "allDay": 1, "color": 1, "type": 1})
         flag = True
     else:
         eventi = Event.find({'calendar': calendario})
@@ -647,6 +709,35 @@ def authorization_filter(id_auth, calendario):
                         return []
                     eventi_good.append(item)
     return eventi_good
+
+@post("/events_delegate")
+def eventsCanView():
+    query = get_query_new(request.body.read().decode('utf-8'))
+    delegate_events = eventsADelegateCanRead(query["id"], query["calendar_id"])
+    if len(delegate_events) != 0:
+        return json_util.dumps(delegate_events)
+
+@post("/types_delegate")
+def eventsCanView():
+    query = get_query_new(request.body.read().decode('utf-8'))
+    delegate_events = eventsADelegateCanRead(query["id"], query["calendar_id"])
+    types = set()
+    if len(delegate_events) != 0:
+        for item in delegate_events:
+            types.add(item["type"])
+        return json_util.dumps(types)
+
+@post("/groups_delegate")
+def groups_delegate():
+    query = get_query_new(request.body.read().decode('utf-8'))
+    res = Auth.find({"calendar_id": query["calendar_id"]}, {"group_id": 1, "_id": 0})
+    g = []
+    for groups in res:
+        group = Group.find_one({"_id": ObjectId(groups["group_id"])}, {"_id": 1, "name": 1})
+        if not isInList(g, group, "_id", "_id"):
+            g.append(group)
+    print(g)
+    return json_util.dumps(g)
 
 
 def precond(pre, eventi, calendar):
@@ -726,24 +817,28 @@ def getVisibileEventsWithHier(user, calendar, function_scope):
     G = getG(owner_Cal["owner"])
     # otteniamo la lista dei gruppi a cui l'utente appartiene
     g_id = (user_to_group(user))
+    group_name = []
     for group in g_id:
-        group_name = Group.find_one({"_id": group}, {"_id": 0, "name": 1})
-    n = group_name["name"]
-    # ciclichiamo sul grafo alla ricerca di altre autorizzazioni, che verranno ereditate, partendo dal gruppo più
-    # vicino all'utente
+        group_name.append(Group.find_one({"_id": group}, {"_id": 0, "name": 1}))
     groups_auth = []
-    # salviamo le autorizzazioni del gruppo più vicino all'utente e risolviamo conflitti, se ne esistono
-    auth_for_group = Group.find_one({"name": n, "creator": owner_Cal["owner"]},
-                                    {"_id": 0, "Authorization": 1})
-    groups_auth.append((solve_conflict(auth_for_group, calendar, authorization_type_to_find)))
-    while n != "ANY":
-        for node in G.successors(n):
-            n = node
-            # salviamo le autorizzazioni dei gruppi più alti in gerarchia e risolviamo conflitti, se ne esistono
-            auth_for_group = Group.find_one({"name": node, "creator": owner_Cal["owner"]},
-                                            {"_id": 0, "Authorization": 1})
-            groups_auth.append((solve_conflict(auth_for_group, calendar, authorization_type_to_find)))
-    no_event = True
+    no_event = False
+    for group in group_name:
+        n = group["name"]
+        # ciclichiamo sul grafo alla ricerca di altre autorizzazioni, che verranno ereditate, partendo dal gruppo più
+        # vicino all'utente
+        # salviamo le autorizzazioni del gruppo più vicino all'utente e risolviamo conflitti, se ne esistono
+        auth_for_group = Group.find_one({"name": n, "creator": owner_Cal["owner"]},
+                                        {"_id": 0, "Authorization": 1})
+        groups_auth.append((solve_conflict(auth_for_group, calendar, authorization_type_to_find)))
+        while n != "ANY":
+            for node in G.successors(n):
+                n = node
+                # salviamo le autorizzazioni dei gruppi più alti in gerarchia e risolviamo conflitti, se ne esistono
+                auth_for_group = Group.find_one({"name": node, "creator": owner_Cal["owner"]},
+                                                {"_id": 0, "Authorization": 1})
+                groups_auth.append((solve_conflict(auth_for_group, calendar, authorization_type_to_find)))
+        no_event = True
+
     for item in groups_auth:
         if len(item) != 0:
             no_event = False
@@ -889,17 +984,19 @@ def getAllPre():
         list_pre.append(item)
     return json_util.dumps(list_pre)
 
+
 @post("/list_admin_pre")
 def getAllAdminPre():
     query = get_query_new(request.body.read().decode('utf-8'))
     res = Admin_Auth.find({"creator": query["id"]})
     list_pre = []
     for item in res:
-        user_name = User.find_one({"_id": ObjectId(item["user_id"])}, {"_id":0, "username":1})
+        user_name = User.find_one({"_id": ObjectId(item["user_id"])}, {"_id": 0, "username": 1})
         item.pop("user_id")
         result = {**item, **user_name}
         list_pre.append(result)
     return json_util.dumps(list_pre)
+
 
 @post("/delete_admin_pre")
 def deleteAdminPre():
@@ -934,24 +1031,30 @@ def deletePre():
 
 
 def eventsADelegateCanRead(user_id, calendar_id):
-    #1. Check, is he a Delegate?
+    # 1. Check, is he a Delegate?
     res = Admin_Auth.find_one({"user_id": user_id, "calendar_id": calendar_id})
     if res is None:
         print("Non si tratta di un delegato")
-        return[]
+        return []
     print("Hey, delegato, puoi vedere:")
     events = Event.find({"calendar": calendar_id})
     if events is None:
         print("Sei un delegato, ma non ci sono eventi su questo calendario")
-        return[]
-
+        return []
+    list_events = []
     if res["repetition"] == "true":
-        timeslot = res["startDay"] + "." + res["startHour"]+":" + res["startMin"] + "-" + res["endDay"] + "." + res["endHour"]+":" + res["endMin"]
-        return evaluate_rep_admin(timeslot, events)
+        timeslot = res["startDay"] + "." + res["startHour"] + ":" + res["startMin"] + "-" + res["endDay"] + "." + res[
+            "endHour"] + ":" + res["endMin"]
+        list_events = evaluate_rep_admin(timeslot, events)
     else:
-        timeslot = res["start"]+"-" + res["end"]
-        return evaluate_not_rep_admin(timeslot, events)
+        timeslot = res["start"] + "-" + res["end"]
+        list_events = evaluate_not_rep_admin(timeslot, events)
 
+    event_create_by_delegate = Event.find({"creator": user_id, "calendar": calendar_id})
+    for event in event_create_by_delegate:
+        if not isInList(list_events, event, "_id", "_id"):
+            list_events.append(event)
+    return list_events
 
 
 # In caso di delegato, aggiungere eventi che può vedere
@@ -969,19 +1072,15 @@ def vis():
             event_owner_cal.append(item)
         return json_util.dumps(event_owner_cal)
 
-    #Se si tratta di un delegato, ritorna tutti gli eventi di quel calendario
+    # Se si tratta di un delegato, ritorna tutti gli eventi di quel calendario
     delegate_events = eventsADelegateCanRead(query["id"], query['calendar'])
     if len(delegate_events) != 0:
         return json_util.dumps(delegate_events)
-
     # Possono esserci più auth, su più gruppi
     user_group = user_to_group(query["id"])
     events = getVisibileEventsWithHier(query['id'], query['calendar'], "show")
-
     # print("User can write: ", eventUserCanWrite(query["id"], query["calendar"]))
     events_writable = eventUserCanWrite(query["id"], query["calendar"])
-
-
 
     if len(events) != 0:
         if len(user_group) == 1:
