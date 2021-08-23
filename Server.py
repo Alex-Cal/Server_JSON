@@ -292,15 +292,27 @@ def user_cal():
 @post('/delete_event')
 def delete_event():
     query = get_query_new(request.body.read().decode('utf-8'))
-    print(query)
     myquery = {"_id": ObjectId(query['_id'])}
-    res = Event.find_one(myquery, {"calendar": 1})
-    ris = Event.delete_one(myquery)
-    new_query = {"_id": ObjectId(res['calendar'])}
-    Cal.update_one(new_query, {"$pull": {'Events': ObjectId(query['_id'])}})
-    if ris.deleted_count != 1:
-        return "Errore nella cancellazione"
-    return "Cancellazione completata con successo"
+    res = Event.find_one(myquery)
+    canDelete = False
+    if res is not None:
+        if res["creator"] != query["user"]:
+            cal = Cal.find_one({"_id": ObjectId(res["calendar"])})
+            if cal is not None:
+                if cal["owner"] == query["user"]:
+                    canDelete = True
+        else:
+            if res["color"] != "#ff2400":
+                canDelete = True
+
+    if canDelete:
+        ris = Event.delete_one(myquery)
+        new_query = {"_id": ObjectId(res['calendar'])}
+        Cal.update_one(new_query, {"$pull": {'Events': ObjectId(query['_id'])}})
+        if ris.deleted_count != 1:
+            return "Errore nella cancellazione"
+        return "Cancellazione completata con successo"
+    return "Errore nella cancellazione"
 
 
 def create_query(list_param):
@@ -358,7 +370,6 @@ def isThereAConflict(event_calendar, start, end, creator):
                     if isConflict(start, end, event_to_check_with["start"], event_to_check_with["end"]):
                         clashed_event = event_to_check_with
     if len(clashed_event) != 0:
-
         if clashed_event["calendar"] == event_calendar:
             print("Clash sullo stesso calendario", event_calendar)
             if owner["owner"] == clashed_event["creator"]:
@@ -370,18 +381,18 @@ def isThereAConflict(event_calendar, start, end, creator):
                 return True
             if delegate_old_event["level"] == "DELEGATO_ROOT" and delegate_new_event["level"] == "DELEGATO_ADMIN":
                 return False
-
         else:
             complete_event_calendar = Cal.find_one({"_id": ObjectId(event_calendar)})
             complete_clash_event_calendar = Cal.find_one({"_id": ObjectId(clashed_event["calendar"])})
             print("Clash su calendari diversi", event_calendar, clashed_event["calendar"])
-            if (complete_event_calendar["xor"] == "true" and complete_clash_event_calendar == "false") or \
-                    (complete_event_calendar["xor"] == "false" and complete_clash_event_calendar == "false"):
-                return True
-            if complete_event_calendar["xor"] == "true" and complete_clash_event_calendar == "true":
+            if (complete_event_calendar["xor"] == "true" and complete_clash_event_calendar["xor"] == "false") or \
+                    (complete_event_calendar["xor"] == "false" and complete_clash_event_calendar["xor"] == "false"):
+                return "T"
+            if complete_event_calendar["xor"] == "true" and complete_clash_event_calendar["xor"] == "true":
+                Event.update_one({"_id": ObjectId(clashed_event["_id"])}, {"$set": {"color": "#ff2400"}})
                 return "EX"
-            if complete_event_calendar["xor"] == "false" and complete_clash_event_calendar == "true":
-                return False
+            if complete_event_calendar["xor"] == "false" and complete_clash_event_calendar["xor"] == "true":
+                return "F"
     return True
 
 @post('/insert_event')
@@ -403,14 +414,14 @@ def insert_event():
         isAble = canADelegateAccessTimeslot(query["creator"], query["calendar"], query["start"], query["end"])
         if isAble:
             canSet = isThereAConflict(query["calendar"], query["start"], query["end"], query["creator"])
-            if canSet:
+            if canSet == "T":
                 Event.insert_one(query)
                 myquery = {'_id': ObjectId(query['calendar'])}
                 res = Event.find({}, {'_id'}).sort('_id', -1).limit(1)
                 newvalues = {"$addToSet": {'Events': ObjectId(res[0]['_id'])}}
                 Cal.update_one(myquery, newvalues)
                 return "Inserimento completato con successo (delegato e giusto intervallo)"
-            elif canSet == "X":
+            elif canSet == "EX":
                 #setta il colore a strano
                 query["color"] ="#ff2400"
                 Event.insert_one(query)
