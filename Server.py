@@ -163,7 +163,6 @@ def canADelegateAccessTimeslot(user_id, calendar_id, start_time_to_insert, end_t
             timeslot = admin_pre["start"] + "-" + admin_pre["end"]
             [start_date, start_hour, end_date, end_hour] = string_not_repetition(timeslot)
 
-
             if (datetime.date(start)) >= start_date and (datetime.date(end)) <= end_date:
                 if datetime.time(start) >= start_hour and datetime.time(end) <= end_hour:
                     return True
@@ -200,15 +199,6 @@ def search_auth_write(auth, event_id, event_type):
                 return True
     return False
 
-    ##newvalues_owner_delegate = {"$set": {"title": query['title'], "allDay": query["allDay"], "calendar": query["calendar"], "color": query["color"], "type"}}
-    # nel caso di Alessandro, aggiungere un controllo se l'utente è delegato admin o delegato normale, controllado nelle Admin Auth, ma questo controllo solo per modificare la data
-    # if not (Cal.find_one({"_id": ObjectId(query["calendar"]), "owner": query['username']}) is None):
-
-    # newvalues = {"$set": {"title": query['title']}}
-    # Event.update_one(myquery, newvalues)
-    # item = Event.find()
-    # return json_util.dumps(item)
-
 
 @get('/image')
 def video_image():
@@ -227,24 +217,26 @@ def user_cal():
     list_calendar = set()
     list_group = []
     groups_hier = []
-    res = Cal.find({"owner": query['id']}, {"type": 1, "_id": 1})
+    res = Cal.find({"owner": query['id']}, {"type": 1, "xor": 1, "_id": 1})
     # calendari di cui l'utente è proprietario
     for item in res:
         temp = {
             "id": str(item["_id"]),
-            "type": item["type"]
+            "type": item["type"],
+            "xor": item["xor"]
         }
         list_cal.append(temp)
 
     # calendari per cui l'utente è delegato
-    res = Cal.find({}, {"Admin_auth": 1, "_id": 1, "type": 1})
+    res = Cal.find({}, {"Admin_auth": 1, "_id": 1, "type": 1, "xor": 1})
     for item in res:
         for auth in item["Admin_auth"]:
             admin_auth = Admin_Auth.find_one({"_id": ObjectId(auth)})
             if query["id"] == admin_auth["user_id"]:
                 temp = {
                     "id": str(item["_id"]),
-                    "type": item["type"]
+                    "type": item["type"],
+                    "xor": item["xor"]
                 }
                 list_cal.append(temp)
 
@@ -276,13 +268,15 @@ def user_cal():
             list_calendar.add(cal['calendar_id'])
 
     for cal in list_calendar:
-        res = Cal.find({"_id": ObjectId(cal)}, {"type": 1, "_id": 1})
+        res = Cal.find_one({"_id": ObjectId(cal)}, {"type": 1, "_id": 1, "xor": 1})
         temp = {
-            "id": str(res[0]["_id"]),
-            "type": res[0]["type"]
+            "id": str(res["_id"]),
+            "type": res["type"],
+            "xor": res["xor"]
         }
         if not isInList(list_cal, temp, "id", "id"):
             list_cal.append(temp)
+
     return json_util.dumps(list_cal)
 
 
@@ -331,11 +325,62 @@ def get_query_new(r):
     return create_query(pair)
 
 
+def isConflict(start_a, end_a, start_b, end_b):
+    start = datetime.fromtimestamp(int(start_a))
+    end = datetime.fromtimestamp(int(end_a))
+
+    start_c = datetime.fromtimestamp(int(start_b))
+    end_c = datetime.fromtimestamp(int(end_b))
+
+    if datetime.date(start) >= datetime.date(start_c) and datetime.date(end) <= datetime.date(end_c):
+        if datetime.time(start) >= datetime.time(start_c) and datetime.time(end) <= datetime.time(end_c):
+            return True
+    return False
+
+
+def isThereAConflict(event_calendar, start, end, creator):
+    owner = Cal.find_one({"_id": ObjectId(event_calendar)}, {"owner": 1, "_id": 0})
+    clashed_event = {}
+    if owner is not None:
+        calendars = Cal.find({"owner": owner["owner"]})
+        for calendar in calendars:
+            for event in calendar["Events"]:
+                event_to_check_with = Event.find_one({"_id": event})
+                if event_to_check_with is not None:
+                    if isConflict(start, end, event_to_check_with["start"], event_to_check_with["end"]):
+                        clashed_event = event_to_check_with
+    if len(clashed_event) != 0:
+
+        if clashed_event["calendar"] == event_calendar:
+            print("Clash sullo stesso calendario", event_calendar)
+            if owner["owner"] == clashed_event["creator"]:
+                return False
+            delegate_new_event = Admin_Auth.find_one({"user_id": creator}, {"level": 1})
+            delegate_old_event = Admin_Auth.find_one({"user_id": clashed_event["creator"]}, {"level": 1})
+            if delegate_old_event["level"] == delegate_new_event["level"] or \
+                    (delegate_new_event["level"] == "DELEGATO_ROOT" and delegate_old_event["level"] == "DELEGATO_ADMIN"):
+                return True
+            if delegate_old_event["level"] == "DELEGATO_ROOT" and delegate_new_event["level"] == "DELEGATO_ADMIN":
+                return False
+
+        else:
+            complete_event_calendar = Cal.find_one({"_id": ObjectId(event_calendar)})
+            complete_clash_event_calendar = Cal.find_one({"_id": ObjectId(clashed_event["calendar"])})
+            print("Clash su calendari diversi", event_calendar, clashed_event["calendar"])
+            if (complete_event_calendar["xor"] == "true" and complete_clash_event_calendar == "false") or \
+                    (complete_event_calendar["xor"] == "false" and complete_clash_event_calendar == "false"):
+                return True
+            if complete_event_calendar["xor"] == "true" and complete_clash_event_calendar == "true":
+                return "EX"
+            if complete_event_calendar["xor"] == "false" and complete_clash_event_calendar == "true":
+                return False
+    return True
+
 @post('/insert_event')
 def insert_event():
     # controllare se si tratta dell'owner o di un delegato; serve lo username dell'utente che vuole fare l'operazione
     query = get_query_new(request.body.read().decode('utf-8'))
-    print(query)
+    # print(query)
     isOwner = Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["creator"]})
     if isOwner is not None:
         Event.insert_one(query)
@@ -344,21 +389,32 @@ def insert_event():
         newvalues = {"$addToSet": {'Events': ObjectId(res[0]['_id'])}}
         Cal.update_one(myquery, newvalues)
         return "Inserimento completato con successo (owner del calendario)"
+
     existAuth = Admin_Auth.find_one({"user_id": query["creator"], "calendar_id": query["calendar"]})
     if existAuth is not None:
-        isAble =canADelegateAccessTimeslot(query["creator"], query["calendar"], query["start"], query["end"])
+        isAble = canADelegateAccessTimeslot(query["creator"], query["calendar"], query["start"], query["end"])
         if isAble:
-            Event.insert_one(query)
-            myquery = {'_id': ObjectId(query['calendar'])}
-            res = Event.find({}, {'_id'}).sort('_id', -1).limit(1)
-            newvalues = {"$addToSet": {'Events': ObjectId(res[0]['_id'])}}
-            Cal.update_one(myquery, newvalues)
-            return "Inserimento completato con successo (delegato e giusto intervallo)"
+            canSet = isThereAConflict(query["calendar"], query["start"], query["end"], query["creator"])
+            if canSet:
+                Event.insert_one(query)
+                myquery = {'_id': ObjectId(query['calendar'])}
+                res = Event.find({}, {'_id'}).sort('_id', -1).limit(1)
+                newvalues = {"$addToSet": {'Events': ObjectId(res[0]['_id'])}}
+                Cal.update_one(myquery, newvalues)
+                return "Inserimento completato con successo (delegato e giusto intervallo)"
+            elif canSet == "X":
+                #setta il colore a strano
+                Event.insert_one(query)
+                myquery = {'_id': ObjectId(query['calendar'])}
+                res = Event.find({}, {'_id'}).sort('_id', -1).limit(1)
+                newvalues = {"$addToSet": {'Events': ObjectId(res[0]['_id'])}}
+                Cal.update_one(myquery, newvalues)
+                return "Inserimento in due calendari esclusivi; inserimento permesso, con riserva di decisione per l'owner"
+            else:
+                return "Presente un clash, errore nell'inserimento"
         else:
             return "Errore nell'inserimento, timeslot a te non disponibile"
     return "Errore nell'inserimento"
-
-
 
 
 # curl --data "type=School&owner=Alex" http://0.0.0.0:12345/insert_cal
@@ -480,6 +536,7 @@ def calendar_delegate():
         cal = Cal.find_one({"_id": ObjectId(calendar["calendar_id"])}, {"_id": 1, "type": 1})
         calend.append(cal)
     return json_util.dumps(calend)
+
 
 @post('/precondition')
 def insert_precondition():
@@ -710,12 +767,14 @@ def authorization_filter(id_auth, calendario):
                     eventi_good.append(item)
     return eventi_good
 
+
 @post("/events_delegate")
 def eventsCanView():
     query = get_query_new(request.body.read().decode('utf-8'))
     delegate_events = eventsADelegateCanRead(query["id"], query["calendar_id"])
     if len(delegate_events) != 0:
         return json_util.dumps(delegate_events)
+
 
 @post("/types_delegate")
 def eventsCanView():
@@ -726,6 +785,7 @@ def eventsCanView():
         for item in delegate_events:
             types.add(item["type"])
         return json_util.dumps(types)
+
 
 @post("/groups_delegate")
 def groups_delegate():
