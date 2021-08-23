@@ -1025,6 +1025,12 @@ def eventUserCanWrite(user, calendar):
     else:
         return []
 
+def manipulateItem(item):
+    item["group_id"] = Group.find_one({"_id": ObjectId(item["group_id"])}, {"_id": 0, "name": 1})["name"]
+    item["calendar_id"] = Cal.find_one({"_id": ObjectId(item["calendar_id"])}, {"_id": 0, "type": 1})["type"]
+    if item["auth"] == "evento":
+        item["condition"] = Event.find_one({"_id": ObjectId(item["condition"])}, {"_id": 0, "title": 1})["title"]
+    return item
 
 @post("/list_auth")
 def getAllAuth():
@@ -1032,7 +1038,12 @@ def getAllAuth():
     res = Auth.find({"creator": query["id"]})
     list_auth = []
     for item in res:
-        list_auth.append(item)
+        list_auth.append(manipulateItem(item))
+    res = Auth.find({"creator": {"$ne": query["id"]}})
+    for auth_del in res:
+        cal_owner = Cal.find_one({"_id": ObjectId(auth_del["calendar_id"])}, {"owner": 1, "_id": 0})["owner"]
+        if cal_owner == query["id"]:
+            list_auth.append(manipulateItem(auth_del))
     return json_util.dumps(list_auth)
 
 
@@ -1061,6 +1072,8 @@ def getAllPre():
     res = Precondition.find({"creator": query["id"]})
     list_pre = []
     for item in res:
+        item["group_id"] = Group.find_one({"_id": ObjectId(item["group_id"])}, {"_id": 0, "name": 1})["name"]
+        item["calendar_id"] = Cal.find_one({"_id": ObjectId(item["calendar_id"])}, {"_id": 0, "type": 1})["type"]
         list_pre.append(item)
     return json_util.dumps(list_pre)
 
@@ -1071,10 +1084,9 @@ def getAllAdminPre():
     res = Admin_Auth.find({"creator": query["id"]})
     list_pre = []
     for item in res:
-        user_name = User.find_one({"_id": ObjectId(item["user_id"])}, {"_id": 0, "username": 1})
-        item.pop("user_id")
-        result = {**item, **user_name}
-        list_pre.append(result)
+        item["user_id"] = User.find_one({"_id": ObjectId(item["user_id"])}, {"_id": 0, "username": 1})["username"]
+        item["calendar_id"] = Cal.find_one({"_id": ObjectId(item["calendar_id"])}, {"_id": 0, "type": 1})["type"]
+        list_pre.append(item)
     return json_util.dumps(list_pre)
 
 
