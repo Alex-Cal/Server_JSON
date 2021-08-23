@@ -113,6 +113,7 @@ def update_events():
     existAuth = Admin_Auth.find_one({"user_id": query["username"], "calendar_id": query["calendar"]})
     isOwner = Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["username"]})
     if isOwner is not None:
+        #quello che modifica diventa il creator dell'evento
         query["creator"] = query["username"]
         query.pop('username')
         Event.delete_one(myquery)
@@ -132,13 +133,20 @@ def update_events():
                 present_user = True
 
     if present_delegate:
+        #quello che modifica diventa il creator dell'evento
         query["creator"] = query["username"]
         query.pop('username')
         Event.delete_one(myquery)
         canUpdDateTime = canADelegateAccessTimeslot(query["creator"], query["calendar"], query["start"], query["end"])
         if (query["start"] == eventToUpdate["start"] and query["end"] == eventToUpdate["end"]) or canUpdDateTime:
+            if canUpdDateTime:
+                if isThereAConflict(query["calendar"], query["start"], query["end"], query["creator"]):
+                    Event.insert_one(query)
+                    return "Evento modificato"
+            query["start"] = eventToUpdate["start"]
+            query["end"] = eventToUpdate["end"]
             Event.insert_one(query)
-            return "Evento modificato"
+            return "Timeslot dell'evento non modificato a causa di clash, ripristinato il timeslot originale"
         elif not canUpdDateTime:
             query["start"] = eventToUpdate["start"]
             query["end"] = eventToUpdate["end"]
@@ -404,6 +412,7 @@ def insert_event():
                 return "Inserimento completato con successo (delegato e giusto intervallo)"
             elif canSet == "X":
                 #setta il colore a strano
+                query["color"] ="#ff2400"
                 Event.insert_one(query)
                 myquery = {'_id': ObjectId(query['calendar'])}
                 res = Event.find({}, {'_id'}).sort('_id', -1).limit(1)
