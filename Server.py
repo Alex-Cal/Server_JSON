@@ -137,6 +137,8 @@ def update_events():
 @get('/image')
 def video_image():
     user_id = request.query.user
+    G = HierarchyUtils.getG(user_id)
+    HierarchyUtils.save_image(G, user_id)
     return bottle.static_file((user_id + ".jpg"), root="", mimetype='image/jpg')
 
 # Servizio che restituisce, per ogni utente, la lista dei calendari a lui accessibile
@@ -604,9 +606,49 @@ def deletePre():
         return "Errore nella cancellazione"
     return "Cancellazione completata con successo"
 
+# Servizio che fornisce la possibilità di rimuovere un utente da un gruppo
+@post("/delete_user")
+def deleteUser():
+    query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
+    user_id = Connections.getUser().find_one({"username": query["user"]}, {"_id":1})
+    if user_id is not None:
+        group = Connections.getGroup().find_one({"_id": ObjectId(query["group"])}, {"_id":1})
+        if group is not None:
+            newvalues = {"$pull": {'User': user_id["_id"]}}
+            Connections.getGroup().update_one({"_id": group["_id"]}, newvalues)
+            return "Rimozione completata con successo"
+        return "Gruppo inesistente"
+    return "Utente inesistente"
+
+
+@post("/delete_user_hier")
+def deleteUserHier():
+    query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
+    print(query)
+    hier = Connections.getHier().find_one({"owner": query["id"]})
+    existGroup = {}
+    if hier is not None:
+        for couple in hier["Hier"]:
+            if couple["node"] == query["son"] and couple["belongsto"] == query["dad"]:
+                existGroup= couple
+                break
+
+        if len(existGroup) != 0:
+            print(existGroup)
+            newvalues = {"$pull": {'Hier': {"node": existGroup["node"], "belongsto": existGroup["belongsto"]}}}
+            Connections.getHier().update_one({"owner": query["id"]}, newvalues)
+            G = HierarchyUtils.getG(query["id"])
+            HierarchyUtils.save_image(G, query["id"])
+            return "Esiste una coppia di questo tipo"
+        else:
+            print("Non esiste coppia")
+            return "Nessuna coppia di questo tipo presente in gerarchia"
+    return "Nessuna gerarchia presente"
+
+
 # Servizio che fornisce tutti gli eventi visibili su un determinato calendario
 @post("/event_vis")
-def vis():
+def event_vis():
     event_owner_cal = []
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
     if len(query['calendar'])==0:
