@@ -1,23 +1,10 @@
-from Utility import Utils, PreCondUtils, EventViewerUtils, ClashUtils, StringUtils, HierarchyUtils
+from Utility import Utils, PreCondUtils, EventViewerUtils, ClashUtils, StringUtils, HierarchyUtils, Connections
 
 import networkx as nx
 from bottle import run, request, post, get, response
-import pymongo
 import bottle
+from bottle_cors_plugin import cors_plugin
 from bson import json_util, ObjectId
-
-# Connection to MongoDB
-
-myclient = pymongo.MongoClient("mongodb://localhost:27017/")
-mydb = myclient["CalendarDB"]
-Cal = mydb["Calendar"]
-Event = mydb["Events"]
-Precondition = mydb["Temporal Pre-Condition"]
-Admin_Auth = mydb["Admin_Auth"]
-Auth = mydb["Authorization"]
-User = mydb["User"]
-Group = mydb["Group"]
-Hier = mydb["Hier"]
 
 
 # Abilita, per ogni richiesta, header di risposta con CORS
@@ -39,7 +26,6 @@ class EnableCors(object):
 
         return _enable_cors
 
-
 app = bottle.app()
 
 
@@ -52,7 +38,7 @@ def lvambience():
 @post('/all_type_event')
 def all_type():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
-    res = Event.find({"creator": query["id"]}, {"type": 1})
+    res = Connections.getEvent().find({"creator": query["id"]}, {"type": 1})
     lista_event = set()
     for item in res:
         lista_event.add(item["type"])
@@ -63,7 +49,7 @@ def all_type():
 @post("/calendar_event")
 def cal_event():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
-    res = Event.find({"calendar": query['calendar']}, {"_id": 1, "title": 1})
+    res = Connections.getEvent().find({"calendar": query['calendar']}, {"_id": 1, "title": 1})
     lista_event = []
     for item in res:
         lista_event.append(item)
@@ -75,21 +61,21 @@ def update_events():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
     query['_id'] = ObjectId(query['_id'])
     myquery = {"_id": (query['_id'])}
-    eventToUpdate = Event.find_one(myquery)
+    eventToUpdate = Connections.getEvent().find_one(myquery)
 
     present_delegate = False
     present_user = False
 
-    existAuth = Admin_Auth.find_one({"user_id": query["username"], "calendar_id": query["calendar"]})
-    isOwner = Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["username"]})
+    existAuth = Connections.getAdmin_Auth().find_one({"user_id": query["username"], "calendar_id": query["calendar"]})
+    isOwner = Connections.getCal().find_one({"_id": ObjectId(query['calendar']), "owner": query["username"]})
 
     # L'owner del calendario può sempre modificare tutti gli eventi sul suo calendario
     if isOwner is not None:
         #quello che modifica diventa il creator dell'evento
         query["creator"] = query["username"]
         query.pop('username')
-        Event.delete_one(myquery)
-        Event.insert_one(query)
+        Connections.getEvent().delete_one(myquery)
+        Connections.getEvent().insert_one(query)
         return "Modifica completata con successo"
 
     # Se sei un delegato del calendario X, bisogna controllare l'evento che vuoi modificare
@@ -99,7 +85,7 @@ def update_events():
 
     # Se esiste una auth da delegato (aka, se sei un delegato)
     elif existAuth is not None:
-        checkAminDel = Admin_Auth.find_one({"user_id": eventToUpdate["creator"], "calendar_id": query["calendar"]})
+        checkAminDel = Connections.getAdmin_Auth().find_one({"user_id": eventToUpdate["creator"], "calendar_id": query["calendar"]})
         if checkAminDel is not None:
             if (checkAminDel["level"] == "DELEGATO_ADMIN" and existAuth["level"] == "DELEGATO_ROOT") or \
                     (eventToUpdate["creator"] == query["username"]) or \
@@ -117,33 +103,33 @@ def update_events():
         #quello che modifica diventa il creator dell'evento
         query["creator"] = query["username"]
         query.pop('username')
-        Event.delete_one(myquery)
+        Connections.getEvent().delete_one(myquery)
         canUpdDateTime = PreCondUtils.canADelegateAccessTimeslot(query["creator"], query["calendar"], query["start"], query["end"])
         # Se il timeslot non viene modificato, l'evento modificato può essere inserito senza problemi
         if (query["start"] == eventToUpdate["start"] and query["end"] == eventToUpdate["end"]) or canUpdDateTime:
             if canUpdDateTime:
                 # Se la modifica del timeslot genera un clash, questo viene gestito e, di conseguenza, l'inserimento è funzionale all'esito del clash
                 if ClashUtils.isThereAConflict(query["calendar"], query["start"], query["end"], query["creator"]):
-                    Event.insert_one(query)
+                    Connections.getEvent().insert_one(query)
                     return "Evento modificato"
             # Se il timeslot non viene modificato, si inserisce il vecchio timeslot
             query["start"] = eventToUpdate["start"]
             query["end"] = eventToUpdate["end"]
-            Event.insert_one(query)
+            Connections.getEvent().insert_one(query)
             return "Timeslot dell'evento non modificato a causa di clash, ripristinato il timeslot originale"
         elif not canUpdDateTime:
             # Se l'utente non può modificare il timeslot, viene settato quello originale
             query["start"] = eventToUpdate["start"]
             query["end"] = eventToUpdate["end"]
-            Event.insert_one(query)
+            Connections.getEvent().insert_one(query)
             return "Errore nella modifica, timeslot invariato"
     # Se non si è delegato, ma utente con auth di scrittura, modifica l'evento, senza modificare il timeslot
     elif present_user:
-        Event.delete_one(myquery)
+        Connections.getEvent().delete_one(myquery)
         query.pop('username')
         query["start"] = eventToUpdate["start"]
         query["end"] = eventToUpdate["end"]
-        Event.insert_one(query)
+        Connections.getEvent().insert_one(query)
         return "Modifica completata con successo (timeslot invariato)"
     return "Errore nella modifica"
 
@@ -162,8 +148,9 @@ def user_cal():
     list_group = []
     groups_hier = []
     # Si recuperano prima tutti i calendari di cui l'utente è owner
-    res = Cal.find({"owner": query['id']}, {"type": 1, "xor": 1, "_id": 1})
 
+
+    res = Connections.getCal().find({"owner": query['id']}, {"type": 1, "xor": 1, "_id": 1})
     for item in res:
         temp = {
             "id": str(item["_id"]),
@@ -173,10 +160,10 @@ def user_cal():
         list_cal.append(temp)
 
     # calendari per cui l'utente è delegato
-    res = Cal.find({}, {"Admin_auth": 1, "_id": 1, "type": 1, "xor": 1})
+    res = Connections.getCal().find({}, {"Admin_auth": 1, "_id": 1, "type": 1, "xor": 1})
     for item in res:
         for auth in item["Admin_auth"]:
-            admin_auth = Admin_Auth.find_one({"_id": ObjectId(auth)})
+            admin_auth = Connections.getAdmin_Auth().find_one({"_id": ObjectId(auth)})
             if query["id"] == admin_auth["user_id"]:
                 temp = {
                     "id": str(item["_id"]),
@@ -186,7 +173,7 @@ def user_cal():
                 list_cal.append(temp)
 
     # Si recuperano i gruppi a cui l'utente appartiene e su cui esistono delle autorizzazioni di visibilità
-    ris = Group.find({}, {"_id": 1, "User": 1})
+    ris = Connections.getGroup().find({}, {"_id": 1, "User": 1})
     for item in ris:
         for user in item['User']:
             if user == ObjectId(query['id']):
@@ -195,14 +182,14 @@ def user_cal():
     # calendari a cui l'utente non ha accesso diretto, ma eredita l'accesso dalla gerarchia
     # In questo caso, si accede alla gerarchia associata, per recuperare i gruppi a cui appartiene in gerarchia
     for group in list_group:
-        res = Group.find({"_id": ObjectId(group)}, {"creator": 1, "name": 1})
+        res = Connections.getGroup().find({"_id": ObjectId(group)}, {"creator": 1, "name": 1})
         for g in res:
             G = HierarchyUtils.getG(g["creator"])
             n = Utils.getGroupName(group)["name"]
             while n != "ANY":
                 for node in G.successors(n):
                     n = node
-                    group_find = Group.find_one({"name": node, "creator": g["creator"]}, {"_id": 1})
+                    group_find = Connections.getGroup().find_one({"name": node, "creator": g["creator"]}, {"_id": 1})
                     if group_find is not None:
                         groups_hier.append(str(group_find["_id"]))
 
@@ -211,13 +198,13 @@ def user_cal():
 
     # Si recuperano i calendari associati a questi gruppi e sono in un set
     for item in complete_groups:
-        result = Auth.find({"group_id": item}, {"calendar_id": 1})
+        result = Connections.getAuth().find({"group_id": item}, {"calendar_id": 1})
         for cal in result:
             list_calendar.add(cal['calendar_id'])
 
     # Si trasforma il set in una lista json senza duplicati e la si restistuisce
     for cal in list_calendar:
-        res = Cal.find_one({"_id": ObjectId(cal)}, {"type": 1, "_id": 1, "xor": 1})
+        res = Connections.getCal().find_one({"_id": ObjectId(cal)}, {"type": 1, "_id": 1, "xor": 1})
         temp = {
             "id": str(res["_id"]),
             "type": res["type"],
@@ -234,12 +221,12 @@ def user_cal():
 def delete_event():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
     myquery = {"_id": ObjectId(query['_id'])}
-    res = Event.find_one(myquery)
+    res = Connections.getEvent().find_one(myquery)
     canDelete = False
     # Se l'utente è il creatore dell'evento e l'evento non ha generato clash, può rimuoverlo; se non è il creatore, ma è l'owner del calendario, può rimuoverlo sempre
     if res is not None:
         if res["creator"] != query["user"]:
-            cal = Cal.find_one({"_id": ObjectId(res["calendar"])})
+            cal = Connections.getCal().find_one({"_id": ObjectId(res["calendar"])})
             if cal is not None:
                 if cal["owner"] == query["user"]:
                     canDelete = True
@@ -249,9 +236,9 @@ def delete_event():
                 canDelete = True
 
     if canDelete:
-        ris = Event.delete_one(myquery)
+        ris = Connections.getEvent().delete_one(myquery)
         new_query = {"_id": ObjectId(res['calendar'])}
-        Cal.update_one(new_query, {"$pull": {'Events': ObjectId(query['_id'])}})
+        Connections.getCal().update_one(new_query, {"$pull": {'Events': ObjectId(query['_id'])}})
         if ris.deleted_count != 1:
             return "Errore nella cancellazione"
         return "Cancellazione completata con successo"
@@ -262,38 +249,38 @@ def delete_event():
 @post('/insert_event')
 def insert_event():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
-    isOwner = Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["creator"]})
+    isOwner = Connections.getCal().find_one({"_id": ObjectId(query['calendar']), "owner": query["creator"]})
     # L'owner del calendario può sempre inserire eventi sul suo calendario, senza limiti
     if isOwner is not None:
-        Event.insert_one(query)
+        Connections.getEvent().insert_one(query)
         myquery = {'_id': ObjectId(query['calendar'])}
-        res = Event.find({}, {'_id'}).sort('_id', -1).limit(1)
+        res = Connections.getEvent().find({}, {'_id'}).sort('_id', -1).limit(1)
         newvalues = {"$addToSet": {'Events': ObjectId(res[0]['_id'])}}
-        Cal.update_one(myquery, newvalues)
+        Connections.getCal().update_one(myquery, newvalues)
         return "Inserimento completato con successo (owner del calendario)"
 
     # Se non si tratta di owner, controlla che si tratti di un delegato
-    existAuth = Admin_Auth.find_one({"user_id": query["creator"], "calendar_id": query["calendar"]})
+    existAuth = Connections.getAdmin_Auth().find_one({"user_id": query["creator"], "calendar_id": query["calendar"]})
     if existAuth is not None:
         isAble = PreCondUtils.canADelegateAccessTimeslot(query["creator"], query["calendar"], query["start"], query["end"])
         if isAble:
             # canSet indica l'esito della valutazione del clash, dove T= no clash (o clash con inserimento concesso), EX indica clash su due calendari esclusivi e uso del colore per indicare il calsh
             canSet = ClashUtils.isThereAConflict(query["calendar"], query["start"], query["end"], query["creator"])
             if canSet == "T":
-                Event.insert_one(query)
+                Connections.getEvent().insert_one(query)
                 myquery = {'_id': ObjectId(query['calendar'])}
-                res = Event.find({}, {'_id'}).sort('_id', -1).limit(1)
+                res = Connections.getEvent().find({}, {'_id'}).sort('_id', -1).limit(1)
                 newvalues = {"$addToSet": {'Events': ObjectId(res[0]['_id'])}}
-                Cal.update_one(myquery, newvalues)
+                Connections.getCal().update_one(myquery, newvalues)
                 return "Inserimento completato con successo (delegato e giusto intervallo)"
             elif canSet == "EX":
                 #setta il colore per indicare il clash
                 query["color"] ="#ff2400"
-                Event.insert_one(query)
+                Connections.getEvent().insert_one(query)
                 myquery = {'_id': ObjectId(query['calendar'])}
-                res = Event.find({}, {'_id'}).sort('_id', -1).limit(1)
+                res = Connections.getEvent().find({}, {'_id'}).sort('_id', -1).limit(1)
                 newvalues = {"$addToSet": {'Events': ObjectId(res[0]['_id'])}}
-                Cal.update_one(myquery, newvalues)
+                Connections.getCal().update_one(myquery, newvalues)
                 return "Inserimento in due calendari esclusivi; inserimento permesso, con riserva di decisione per l'owner"
             else:
                 return "Presente un clash, errore nell'inserimento"
@@ -308,7 +295,7 @@ def insert_cal():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
     query2 = {"Events": [], "Precondition": [], "Admin_auth": [], "Authorization": []}
     new_dict = {**query, **query2}
-    Cal.insert_one(new_dict)
+    Connections.getCal().insert_one(new_dict)
     return "Inserimento del calendario avvenuto con successo"
 
 # Servizio che restituisce la lista di calendari di cui l'utente è owner
@@ -316,7 +303,7 @@ def insert_cal():
 def cal_owner():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
     list_cal = []
-    res = Cal.find({"owner": query['id']}, {"type": 1, "_id": 1})
+    res = Connections.getCal().find({"owner": query['id']}, {"type": 1, "_id": 1})
     for item in res:
         list_cal.append(item)
     return json_util.dumps(list_cal)
@@ -333,16 +320,16 @@ def insert_user():
     query["_id"] = ObjectId(query["_id"])
     query2 = {"Group": [], "Precondition": [], "Admin_auth": [], "Authorization": []}
     new_dict = {**query, **query2}
-    if User.find_one({"_id": query['_id']}) is None:
-        User.insert_one(new_dict)
+    if Connections.getUser().find_one({"_id": query['_id']}) is None:
+        Connections.getUser().insert_one(new_dict)
         query_id = {"owner": str(query["_id"]), "Hier": []}
         G = nx.DiGraph()
         G.add_node("ANY")
         HierarchyUtils.save_image(G, str(query["_id"]))
-        Hier.insert_one(query_id)
+        Connections.getHier().insert_one(query_id)
         update = {"$addToSet": {'Hier': {"node": "ANY", "belongsto": ""}}}
         query = {'owner': str(query["_id"])}
-        Hier.update_one(query, update)
+        Connections.getHier().update_one(query, update)
 
 
 # Servizio che permette di aggiungere un gruppo (precedentemente creato) alla gerarchia
@@ -352,7 +339,7 @@ def group_hier():
     id = query["id"]
     update = {"$addToSet": {'Hier': {"node": query["son"], "belongsto": query["dad"]}}}
     query = {'owner': query["id"]}
-    Hier.update_one(query, update)
+    Connections.getHier().update_one(query, update)
     G = HierarchyUtils.getG(id)
     HierarchyUtils.save_image(G, id)
 
@@ -363,8 +350,8 @@ def insert_group():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
     query2 = {"User": [], "Precondition": [], "Authorization": []}
     new_dict = {**query, **query2}
-    if Group.find_one({"name": query["name"], "creator": query["creator"]}) is None:
-        Group.insert_one(new_dict)
+    if Connections.getGroup().find_one({"name": query["name"], "creator": query["creator"]}) is None:
+        Connections.getGroup().insert_one(new_dict)
         return "Gruppo inserito con successo"
     return "Impossibile inserire il gruppo"
 
@@ -376,29 +363,29 @@ def insert_auth():
     myquery = {'_id': ObjectId(query['calendar_id'])}
     myquery2 = {'_id': ObjectId(query['group_id'])}
     # Possibilità di inserire una auth anche per un delegato (si noti che un Delegato_ADMIN può inserire solo auth di tipo read)
-    isDelegate = Admin_Auth.find_one({"user_id": query["creator"], "calendar_id": query["calendar_id"]})
+    isDelegate = Connections.getAdmin_Auth().find_one({"user_id": query["creator"], "calendar_id": query["calendar_id"]})
     if isDelegate is not None:
         if isDelegate["level"] == "DELEGATO_ADMIN" and query["type_auth"] == "write":
             return "Impossibile inserire l'autorizzazione"
 
-    Auth.insert_one(query)
-    res = Auth.find({}, {'_id'}).sort('_id', -1).limit(1)
+    Connections.getAuth().insert_one(query)
+    res = Connections.getAuth().find({}, {'_id'}).sort('_id', -1).limit(1)
     newvalues = {"$addToSet": {'Authorization': ObjectId(res[0]['_id'])}}
-    if User.find_one(myquery2) is None:
-        Group.update_one(myquery2, newvalues)
+    if Connections.getUser().find_one(myquery2) is None:
+        Connections.getGroup().update_one(myquery2, newvalues)
     else:
-        User.update_one(myquery2, newvalues)
-    Cal.update_one(myquery, newvalues)
+        Connections.getUser().update_one(myquery2, newvalues)
+    Connections.getCal().update_one(myquery, newvalues)
     return "Autorizzazione inserita con successo"
 
 # Servizio che restituisce tutti i calendari per cui un utente è delegato
 @post('/calendar_delegate')
 def calendar_delegate():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
-    res = Admin_Auth.find({"user_id": query["id"]}, {"calendar_id": 1})
+    res = Connections.getAdmin_Auth().find({"user_id": query["id"]}, {"calendar_id": 1})
     calend = []
     for calendar in res:
-        cal = Cal.find_one({"_id": ObjectId(calendar["calendar_id"])}, {"_id": 1, "type": 1})
+        cal = Connections.getCal().find_one({"_id": ObjectId(calendar["calendar_id"])}, {"_id": 1, "type": 1})
         calend.append(cal)
     return json_util.dumps(calend)
 
@@ -424,43 +411,43 @@ def insert_precondition():
         query.pop('end')
     newquery = {"timeslot": timeslot}
     new_dict = {**query, **newquery}
-    Precondition.insert_one(new_dict)
-    res = Precondition.find({}, {'_id'}).sort('_id', -1).limit(1)
+    Connections.getPrecondition().insert_one(new_dict)
+    res = Connections.getPrecondition().find({}, {'_id'}).sort('_id', -1).limit(1)
     newvalues = {"$addToSet": {'Precondition': ObjectId(res[0]['_id'])}}
 
-    if (User.find_one(myquery1)) is None:
-        Group.update_one(myquery1, newvalues)
+    if (Connections.getUser().find_one(myquery1)) is None:
+        Connections.getGroup().update_one(myquery1, newvalues)
     else:
-        User.update_one(myquery1, newvalues)
-    Cal.update_one(myquery, newvalues)
+        Connections.getUser().update_one(myquery1, newvalues)
+    Connections.getCal().update_one(myquery, newvalues)
     return "Precondizione inserita"
 
 # Servizio che permette l'inserimento di una auth amministrativa (concessione della delega)
 @post('/auth_admin')
 def insert_admin_auth():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
-    existUser = User.find_one({"username": query["username"]})
+    existUser = Connections.getUser().find_one({"username": query["username"]})
     if existUser is None:
         return "Utente inesistente"
     if existUser["_id"] == ObjectId(query["creator"]):
         return "Impossibile delegare l'owner"
     print(query)
 
-    existAuth = Admin_Auth.find_one({"user_id": str(existUser["_id"]), "calendar_id": query["calendar_id"]})
+    existAuth = Connections.getAdmin_Auth().find_one({"user_id": str(existUser["_id"]), "calendar_id": query["calendar_id"]})
     if existAuth is not None:
         return "È già presente una autorizzazione per questo utente, su questo calendario"
 
     query.pop('username')
     user_id = {"user_id": str(existUser["_id"])}
     to_insert = {**query, **user_id}
-    Admin_Auth.insert_one(to_insert)
+    Connections.getAdmin_Auth().insert_one(to_insert)
 
-    res = Admin_Auth.find({}, {'_id'}).sort('_id', -1).limit(1)
+    res = Connections.getAdmin_Auth().find({}, {'_id'}).sort('_id', -1).limit(1)
     newvalues = {"$addToSet": {'Admin_auth': ObjectId(res[0]['_id'])}}
     myquery = {'_id': ObjectId(query['calendar_id'])}
     myquery1 = {'_id': existUser["_id"]}
-    User.update_one(myquery1, newvalues)
-    Cal.update_one(myquery, newvalues)
+    Connections.getUser().update_one(myquery1, newvalues)
+    Connections.getCal().update_one(myquery, newvalues)
     return "Autorizzazione inserita con successo"
 
 # Servizio che restituisce tutti i gruppi creati da un determinato utente
@@ -468,7 +455,7 @@ def insert_admin_auth():
 def list_group():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
     lista_group_id = []
-    res = Group.find({"creator": query["id"]}, {"name": 1, "_id": 1})
+    res = Connections.getGroup().find({"creator": query["id"]}, {"name": 1, "_id": 1})
     if res is None:
         return []
     for item in res:
@@ -479,17 +466,17 @@ def list_group():
 @post("/insert_user_group")
 def insert_user_group():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
-    res = Cal.find_one({"owner": query["id"]})
+    res = Connections.getCal().find_one({"owner": query["id"]})
     if res is None:
         return "Operazione non autorizzata"
     else:
-        res = User.find_one({"username": query["user"]}, {"_id": 1})
+        res = Connections.getUser().find_one({"username": query["user"]}, {"_id": 1})
         if res is None:
             return "Utente inesistente"
         else:
-            if (Group.find_one({'_id': ObjectId(query['group'])})) is not None:
+            if (Connections.getGroup().find_one({'_id': ObjectId(query['group'])})) is not None:
                 newvalues = {"$addToSet": {'User': res['_id']}}
-                Group.update_one({'_id': ObjectId(query['group'])}, newvalues)
+                Connections.getGroup().update_one({'_id': ObjectId(query['group'])}, newvalues)
             else:
                 return "Gruppo inesistente"
     return "Utente inserito correttamente nel gruppo"
@@ -518,10 +505,10 @@ def eventsCanView():
 @post("/groups_delegate")
 def groups_delegate():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
-    res = Auth.find({"calendar_id": query["calendar_id"]}, {"group_id": 1, "_id": 0})
+    res = Connections.getAuth().find({"calendar_id": query["calendar_id"]}, {"group_id": 1, "_id": 0})
     g = []
     for groups in res:
-        group = Group.find_one({"_id": ObjectId(groups["group_id"])}, {"_id": 1, "name": 1})
+        group = Connections.getGroup().find_one({"_id": ObjectId(groups["group_id"])}, {"_id": 1, "name": 1})
         if not Utils.isInList(g, group, "_id", "_id"):
             g.append(group)
     return json_util.dumps(g)
@@ -531,13 +518,13 @@ def groups_delegate():
 @post("/list_auth")
 def getAllAuth():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
-    res = Auth.find({"creator": query["id"]})
+    res = Connections.getAuth().find({"creator": query["id"]})
     list_auth = []
     for item in res:
         list_auth.append(Utils.manipulateItem(item))
-    res = Auth.find({"creator": {"$ne": query["id"]}})
+    res = Connections.getAuth().find({"creator": {"$ne": query["id"]}})
     for auth_del in res:
-        cal_owner = Cal.find_one({"_id": ObjectId(auth_del["calendar_id"])}, {"owner": 1, "_id": 0})["owner"]
+        cal_owner = Connections.getCal().find_one({"_id": ObjectId(auth_del["calendar_id"])}, {"owner": 1, "_id": 0})["owner"]
         if cal_owner == query["id"]:
             list_auth.append(Utils.manipulateItem(auth_del))
     return json_util.dumps(list_auth)
@@ -548,15 +535,15 @@ def getAllAuth():
 def deleteAuth():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
     myquery = {"_id": ObjectId(query['auth_id'])}
-    ris = Auth.find_one(myquery, {"calendar_id": 1, "group_id": 1})
-    res = Auth.delete_one(myquery)
+    ris = Connections.getAuth().find_one(myquery, {"calendar_id": 1, "group_id": 1})
+    res = Connections.getAuth().delete_one(myquery)
     newvalues = {"$pull": {'Authorization': ris["_id"]}}
-    test = Cal.find_one({"_id": ObjectId(ris["calendar_id"])})
-    Cal.update_one({"_id": ObjectId(ris["calendar_id"])}, newvalues)
-    if User.find_one({"_id": ObjectId(ris["group_id"])}) is None:
-        Group.update_one({"_id": ObjectId(ris["group_id"])}, newvalues)
+    test = Connections.getCal().find_one({"_id": ObjectId(ris["calendar_id"])})
+    Connections.getCal().update_one({"_id": ObjectId(ris["calendar_id"])}, newvalues)
+    if Connections.getUser().find_one({"_id": ObjectId(ris["group_id"])}) is None:
+        Connections.getGroup().update_one({"_id": ObjectId(ris["group_id"])}, newvalues)
     else:
-        User.update_one({"_id": ObjectId(ris["group_id"])}, newvalues)
+        Connections.getUser().update_one({"_id": ObjectId(ris["group_id"])}, newvalues)
     if res.deleted_count != 1:
         return "Errore nella cancellazione"
     return "Cancellazione completata con successo"
@@ -565,11 +552,11 @@ def deleteAuth():
 @post("/list_pre")
 def getAllPre():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
-    res = Precondition.find({"creator": query["id"]})
+    res = Connections.getPrecondition().find({"creator": query["id"]})
     list_pre = []
     for item in res:
-        item["group_id"] = Group.find_one({"_id": ObjectId(item["group_id"])}, {"_id": 0, "name": 1})["name"]
-        item["calendar_id"] = Cal.find_one({"_id": ObjectId(item["calendar_id"])}, {"_id": 0, "type": 1})["type"]
+        item["group_id"] = Connections.getGroup().find_one({"_id": ObjectId(item["group_id"])}, {"_id": 0, "name": 1})["name"]
+        item["calendar_id"] = Connections.getCal().find_one({"_id": ObjectId(item["calendar_id"])}, {"_id": 0, "type": 1})["type"]
         list_pre.append(item)
     return json_util.dumps(list_pre)
 
@@ -577,11 +564,11 @@ def getAllPre():
 @post("/list_admin_pre")
 def getAllAdminPre():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
-    res = Admin_Auth.find({"creator": query["id"]})
+    res = Connections.getAdmin_Auth().find({"creator": query["id"]})
     list_pre = []
     for item in res:
-        item["user_id"] = User.find_one({"_id": ObjectId(item["user_id"])}, {"_id": 0, "username": 1})["username"]
-        item["calendar_id"] = Cal.find_one({"_id": ObjectId(item["calendar_id"])}, {"_id": 0, "type": 1})["type"]
+        item["user_id"] = Connections.getUser().find_one({"_id": ObjectId(item["user_id"])}, {"_id": 0, "username": 1})["username"]
+        item["calendar_id"] = Connections.getCal().find_one({"_id": ObjectId(item["calendar_id"])}, {"_id": 0, "type": 1})["type"]
         list_pre.append(item)
     return json_util.dumps(list_pre)
 
@@ -590,11 +577,11 @@ def getAllAdminPre():
 def deleteAdminPre():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
     myquery = {"_id": ObjectId(query['pre_id'])}
-    ris = Admin_Auth.find_one(myquery, {"calendar_id": 1, "user_id": 1})
-    res = Admin_Auth.delete_one(myquery)
+    ris = Connections.getAdmin_Auth().find_one(myquery, {"calendar_id": 1, "user_id": 1})
+    res = Connections.getAdmin_Auth().delete_one(myquery)
     newvalues = {"$pull": {'Admin_auth': ris["_id"]}}
-    Cal.update_one({"_id": ObjectId(ris["calendar_id"])}, newvalues)
-    User.update_one({"_id": ObjectId(ris["user_id"])}, newvalues)
+    Connections.getCal().update_one({"_id": ObjectId(ris["calendar_id"])}, newvalues)
+    Connections.getUser().update_one({"_id": ObjectId(ris["user_id"])}, newvalues)
     if res.deleted_count != 1:
         return "Errore nella cancellazione"
     return "Cancellazione completata con successo"
@@ -605,14 +592,14 @@ def deleteAdminPre():
 def deletePre():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
     myquery = {"_id": ObjectId(query['pre_id'])}
-    ris = Precondition.find_one(myquery, {"calendar_id": 1, "group_id": 1})
-    res = Precondition.delete_one(myquery)
+    ris = Connections.getPrecondition().find_one(myquery, {"calendar_id": 1, "group_id": 1})
+    res = Connections.getPrecondition().delete_one(myquery)
     newvalues = {"$pull": {'Precondition': ris["_id"]}}
-    Cal.update_one({"_id": ObjectId(ris["calendar_id"])}, newvalues)
-    if User.find_one({"_id": ObjectId(ris["group_id"])}) is None:
-        Group.update_one({"_id": ObjectId(ris["group_id"])}, newvalues)
+    Connections.getCal().update_one({"_id": ObjectId(ris["calendar_id"])}, newvalues)
+    if Connections.getUser().find_one({"_id": ObjectId(ris["group_id"])}) is None:
+        Connections.getGroup().update_one({"_id": ObjectId(ris["group_id"])}, newvalues)
     else:
-        User.update_one({"_id": ObjectId(ris["group_id"])}, newvalues)
+        Connections.getUser().update_one({"_id": ObjectId(ris["group_id"])}, newvalues)
     if res.deleted_count != 1:
         return "Errore nella cancellazione"
     return "Cancellazione completata con successo"
@@ -622,12 +609,13 @@ def deletePre():
 def vis():
     event_owner_cal = []
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
-
-    res = Cal.find_one({"owner": query["id"], "_id": ObjectId(query['calendar'])})
+    if len(query['calendar'])==0:
+        return []
+    res = Connections.getCal().find_one({"owner": query["id"], "_id": ObjectId(query['calendar'])})
     # aggiungi tutti gli eventi contenuti nel calendario di cui è owner
 
     if res is not None:
-        ris = Event.find({"calendar": str(res['_id'])})
+        ris = Connections.getEvent().find({"calendar": str(res['_id'])})
         for item in ris:
             event_owner_cal.append(item)
         return json_util.dumps(event_owner_cal)
@@ -643,11 +631,11 @@ def vis():
 
     if len(events) != 0:
         if len(user_group) == 1:
-            result = Group.find_one({"_id": user_group[0]}, {"Precondition": 1, "_id": 0})
+            result = Connections.getGroup().find_one({"_id": user_group[0]}, {"Precondition": 1, "_id": 0})
             events = PreCondUtils.precond(result['Precondition'], events, query['calendar'])
         else:
             for group in user_group:
-                result = Group.find_one({"_id": group}, {"Precondition": 1, "_id": 0})
+                result = Connections.getGroup().find_one({"_id": group}, {"Precondition": 1, "_id": 0})
                 events = PreCondUtils.precond(result['Precondition'], events, query['calendar'])
         list = [events, events_writable]
         final = Utils.create_set_union(list)
