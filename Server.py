@@ -27,7 +27,7 @@ Group = mydb["Group"]
 Hier = mydb["Hier"]
 
 
-# N.B. Se ci sono due auth, con stesso segno e stesso tipo, bisogna prendere la più generale/specifica ==== controllare
+# Abilita, per ogni richiesta, header di risposta con CORS
 class EnableCors(object):
     name = 'enable_cors'
     api = 2
@@ -55,23 +55,7 @@ def lvambience():
     response.headers['Content-type'] = 'application/json'
     return '[1]'
 
-
-def get_all_types(request):
-    commas = []
-    types = []
-    for item in re.finditer(',', request):
-        commas.append(item.start())
-
-    if len(commas) == 0:
-        return request
-    types.append(request[0:commas[0]])
-    # add check if - greater than 1
-    for i in range(0, len(commas) - 1):
-        types.append(request[commas[i] + 1: commas[i + 1]])
-    types.append(request[commas[len(commas) - 1] + 1:len(request)])
-    return types
-
-
+# Servizio che restituisce tutti i tipi degli eventi creati (utile nella definizione di auth basate sul tipo)
 @post('/all_type_event')
 def all_type():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -82,6 +66,7 @@ def all_type():
     return json_util.dumps(lista_event)
 
 
+# Servizio che restituisce titolo ed id di tutti gli eventi di un determinato calendario (utile nella definizione di auth basate sul singolo evento)
 @post("/calendar_event")
 def cal_event():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -91,14 +76,6 @@ def cal_event():
         lista_event.append(item)
     return json_util.dumps(lista_event)
 
-
-# modify a given event title
-
-# Se sei un delegato del calendario X, bisogna controllare l'evento che vuoi modificare
-# Se l'evento ha come creator l'owner del calendario === fermo, non fai nulla --- present=False
-# Se l'evento ha come creator un delegato ADMIN e tu sei un delegato ROOT --- present = True e lo modifichi
-# Se sei un delegato ADMIN e l'evento è stato creato da te, allora puoi modificarlo --- present = TRUE
-# Se sei delegato ROOT e l'evento è creato da qualsiasi persona, all'infuori dell'owner --- Present = True
 
 @post('/mod_event')
 def update_events():
@@ -112,6 +89,8 @@ def update_events():
 
     existAuth = Admin_Auth.find_one({"user_id": query["username"], "calendar_id": query["calendar"]})
     isOwner = Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["username"]})
+
+    # L'owner del calendario può sempre modificare tutti gli eventi sul suo calendario
     if isOwner is not None:
         #quello che modifica diventa il creator dell'evento
         query["creator"] = query["username"]
@@ -119,6 +98,13 @@ def update_events():
         Event.delete_one(myquery)
         Event.insert_one(query)
         return "Modifica completata con successo"
+
+    # Se sei un delegato del calendario X, bisogna controllare l'evento che vuoi modificare
+    # Se l'evento ha come creator un delegato ADMIN e tu sei un delegato ROOT,  lo modifichi
+    # Se sei un delegato ADMIN e l'evento è stato creato da te, allora puoi modificarlo
+    # Se sei delegato ROOT e l'evento è creato da qualsiasi persona, all'infuori dell'owner, puoi modificarlo
+
+    # Se esiste una auth da delegato (aka, se sei un delegato)
     elif existAuth is not None:
         checkAminDel = Admin_Auth.find_one({"user_id": eventToUpdate["creator"], "calendar_id": query["calendar"]})
         if checkAminDel is not None:
@@ -127,31 +113,38 @@ def update_events():
                     (existAuth["level"] == "DELEGATO_ADMIN" and eventToUpdate["creator"] == existAuth["user_id"]):
                 present_delegate = True
     else:
+        # Controlla, se non sei un delegato, se hai una auth di scrittura per quell'evento
         event_user_can_update = eventUserCanWrite(query["username"], query["calendar"])
         for item in event_user_can_update:
             if item["_id"] == query["_id"]:
                 present_user = True
 
+    # Se sei un delegato, puoi modificare, ma è necessario controllare che il nuovo timeslot (se sei un delegato), sia compatibile con l'auth da delegato
     if present_delegate:
         #quello che modifica diventa il creator dell'evento
         query["creator"] = query["username"]
         query.pop('username')
         Event.delete_one(myquery)
         canUpdDateTime = canADelegateAccessTimeslot(query["creator"], query["calendar"], query["start"], query["end"])
+        # Se il timeslot non viene modificato, l'evento modificato può essere inserito senza problemi
         if (query["start"] == eventToUpdate["start"] and query["end"] == eventToUpdate["end"]) or canUpdDateTime:
             if canUpdDateTime:
+                # Se la modifica del timeslot genera un clash, questo viene gestito e, di conseguenza, l'inserimento è funzionale all'esito del clash
                 if isThereAConflict(query["calendar"], query["start"], query["end"], query["creator"]):
                     Event.insert_one(query)
                     return "Evento modificato"
+            # Se il timeslot non viene modificato, si inserisce il vecchio timeslot
             query["start"] = eventToUpdate["start"]
             query["end"] = eventToUpdate["end"]
             Event.insert_one(query)
             return "Timeslot dell'evento non modificato a causa di clash, ripristinato il timeslot originale"
         elif not canUpdDateTime:
+            # Se l'utente non può modificare il timeslot, viene settato quello originale
             query["start"] = eventToUpdate["start"]
             query["end"] = eventToUpdate["end"]
             Event.insert_one(query)
             return "Errore nella modifica, timeslot invariato"
+    # Se non si è delegato, ma utente con auth di scrittura, modifica l'evento, senza modificare il timeslot
     elif present_user:
         Event.delete_one(myquery)
         query.pop('username')
@@ -162,24 +155,26 @@ def update_events():
     return "Errore nella modifica"
 
 
+# Funzione di utils che, fornito un utente, un calendario e un timeslot, restituisce True se l'utente può inserire in quel determinato timeslot
 def canADelegateAccessTimeslot(user_id, calendar_id, start_time_to_insert, end_time_to_insert):
     admin_pre = Admin_Auth.find_one({"user_id": user_id, "calendar_id": calendar_id})
     if admin_pre is not None:
         start = datetime.fromtimestamp(int(start_time_to_insert))
         end = datetime.fromtimestamp(int(end_time_to_insert))
+        # Individuata la auth di delegato, si controlla il timeslot su cui si applica e si effettua la valutazione
+        # Se repetition == false, allora il timeslot è della forma start-end (in UnixTimestamp format)
         if admin_pre["repetition"] == "false":
             timeslot = admin_pre["start"] + "-" + admin_pre["end"]
             [start_date, start_hour, end_date, end_hour] = string_not_repetition(timeslot)
-
             if (datetime.date(start)) >= start_date and (datetime.date(end)) <= end_date:
                 if datetime.time(start) >= start_hour and datetime.time(end) <= end_hour:
                     return True
             return False
         else:
+            # Se repetition == true, allora il timeslot è della forma startDay.startHour-endDay.endHour dove startDay e endDay
             timeslot = admin_pre["startDay"] + "." + admin_pre["startHour"] + ":" + admin_pre["startMin"] + "-" + \
                        admin_pre["endDay"] + "." + admin_pre["endHour"] + ":" + admin_pre["endMin"]
             [start_day, start_hour, end_day, end_hour] = string_repetition(timeslot)
-
             start_hour_adm = datetime.strptime(start_hour, "%H:%M").time()
             end_hour_adm = datetime.strptime(end_hour, "%H:%M").time()
             if int(datetime.weekday(start)) >= int(start_day) and int(datetime.weekday(end)) <= int(end_day):
@@ -189,7 +184,7 @@ def canADelegateAccessTimeslot(user_id, calendar_id, start_time_to_insert, end_t
     return False
 
 
-# N.B. gestire auth più specifica e conflitto e delegato
+# Funzione che, dato un insieme di autorizzationi, un evento e un tipo di evento, restituisce True se, tra le auth, ce n'è una di scrittura che si applica all'evento fornito (o al tipo fornito)
 def search_auth_write(auth, event_id, event_type):
     for a in auth:
         # conflitti
@@ -207,17 +202,18 @@ def search_auth_write(auth, event_id, event_type):
                 return True
     return False
 
-
+# Servizio che restituisce, per ogni utente, l'immagine associata alla gerarchia da lui creata
 @get('/image')
 def video_image():
     user_id = request.query.user
     return bottle.static_file((user_id + ".jpg"), root="", mimetype='image/jpg')
 
 
+# Funzione che, dato l'id di un gruppo, restituisce il nome associato a quest'ultimo
 def getGroupName(group_id):
     return Group.find_one({"_id": ObjectId(group_id)}, {"_id": 0, "name": 1})
 
-
+# Servizio che restituisce, per ogni utente, la lista dei calendari a lui accessibile
 @post("/user_cal")
 def user_cal():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -225,8 +221,9 @@ def user_cal():
     list_calendar = set()
     list_group = []
     groups_hier = []
+    # Si recuperano prima tutti i calendari di cui l'utente è owner
     res = Cal.find({"owner": query['id']}, {"type": 1, "xor": 1, "_id": 1})
-    # calendari di cui l'utente è proprietario
+
     for item in res:
         temp = {
             "id": str(item["_id"]),
@@ -248,7 +245,7 @@ def user_cal():
                 }
                 list_cal.append(temp)
 
-    # calendari su cui l'utente ha autorizzazioni di visibilità
+    # Si recuperano i gruppi a cui l'utente appartiene e su cui esistono delle autorizzazioni di visibilità
     ris = Group.find({}, {"_id": 1, "User": 1})
     for item in ris:
         for user in item['User']:
@@ -256,6 +253,7 @@ def user_cal():
                 list_group.append(str(item['_id']))
 
     # calendari a cui l'utente non ha accesso diretto, ma eredita l'accesso dalla gerarchia
+    # In questo caso, si accede alla gerarchia associata, per recuperare i gruppi a cui appartiene in gerarchia
     for group in list_group:
         res = Group.find({"_id": ObjectId(group)}, {"creator": 1, "name": 1})
         for g in res:
@@ -268,13 +266,16 @@ def user_cal():
                     if group_find is not None:
                         groups_hier.append(str(group_find["_id"]))
 
+    # Si uniscono i gruppi derivati dalla gerarchia e quelli derivati dalle autorizzazioni
     complete_groups = groups_hier + list_group
 
+    # Si recuperano i calendari associati a questi gruppi e sono in un set
     for item in complete_groups:
         result = Auth.find({"group_id": item}, {"calendar_id": 1})
         for cal in result:
             list_calendar.add(cal['calendar_id'])
 
+    # Si trasforma il set in una lista json senza duplicati e la si restistuisce
     for cal in list_calendar:
         res = Cal.find_one({"_id": ObjectId(cal)}, {"type": 1, "_id": 1, "xor": 1})
         temp = {
@@ -288,13 +289,14 @@ def user_cal():
     return json_util.dumps(list_cal)
 
 
-# delete a specific event parametri saranno l'id dell'evento da cancellare ed il calendario di riferimento
+# Servizio che offre la cancellazione di un evento
 @post('/delete_event')
 def delete_event():
     query = get_query_new(request.body.read().decode('utf-8'))
     myquery = {"_id": ObjectId(query['_id'])}
     res = Event.find_one(myquery)
     canDelete = False
+    # Se l'utente è il creatore dell'evento e l'evento non ha generato clash, può rimuoverlo; se non è il creatore, ma è l'owner del calendario, può rimuoverlo sempre
     if res is not None:
         if res["creator"] != query["user"]:
             cal = Cal.find_one({"_id": ObjectId(res["calendar"])})
@@ -302,6 +304,7 @@ def delete_event():
                 if cal["owner"] == query["user"]:
                     canDelete = True
         else:
+            # Se il colore = #ff2400, indica che c'è stato un clash
             if res["color"] != "#ff2400":
                 canDelete = True
 
@@ -314,14 +317,14 @@ def delete_event():
         return "Cancellazione completata con successo"
     return "Errore nella cancellazione"
 
-
+# Funzione di utils per convertire in formato json
 def create_query(list_param):
     query = {}
     for i in range(0, len(list_param)):
         query[list_param[i][0]] = list_param[i][1]
     return query
 
-
+# Funzione che converte la query in ingresso ad ogni servizio, in un dict
 def get_query_new(r):
     request = r[1:len(r) - 1]
     pair = []
@@ -344,7 +347,7 @@ def get_query_new(r):
                  request[point_list[len(comma_list)] + 2:len(request) - 1]))
     return create_query(pair)
 
-
+# Funzione di utilità che, dati due timeslot, controlla che questi si sovrappongano (utilizzata per i clash)
 def isConflict(start_a, end_a, start_b, end_b):
     start = datetime.fromtimestamp(int(start_a))
     end = datetime.fromtimestamp(int(end_a))
@@ -357,10 +360,11 @@ def isConflict(start_a, end_a, start_b, end_b):
             return True
     return False
 
-
+# Funzione che verifica la presenza di clash, sia su stesso calendario, che su diverso calendario
 def isThereAConflict(event_calendar, start, end, creator):
     owner = Cal.find_one({"_id": ObjectId(event_calendar)}, {"owner": 1, "_id": 0})
     clashed_event = {}
+    # Si analizzano tutti gli eventi e se ne cerca uno (se esiste) che vada in clash con quello che si vuole inserire/modificare
     if owner is not None:
         calendars = Cal.find({"owner": owner["owner"]})
         for calendar in calendars:
@@ -369,11 +373,28 @@ def isThereAConflict(event_calendar, start, end, creator):
                 if event_to_check_with is not None:
                     if isConflict(start, end, event_to_check_with["start"], event_to_check_with["end"]):
                         clashed_event = event_to_check_with
+
+    # Se ne esiste uno, controlla di che tipo di clash si tratta
+    # EVENTI CALENDARI DIVERSI:
+    # - Se il delegato fissa un nuovo evento in un calendaro non esclusivo che va in clash con un evento già fissato di un calendario esclusivo, non fisso il nuovo evento.
+    # - Se ho già fissato un evento in un calendario non esclusivo e sto fissando un evento in un calendario esclusivo, nel caso di clash, lascio entrambi gli eventi
+    # - Se entrambi i calendari sono non eslcusivi, allora lascio entrambi gli eventi memorizzati
+    # - Se i calendari sono entrambi esclusivi, devo notificarlo all'utente e decide lui
+
+    # EVENTI CALENDARI UGUALI:
+    # - Se ci sono eventi fissati da owner, antecedenti a quelli fissati da delegati, vince quello owner ed evento delegato non viee fissato
+    # - Se viene fissato prima l'evento del delegato e poi quello dell'owner, allora lascio fissati entrambi gli eventi
+    # - Stessa cosa vale per eventi fissati dal delegato root rispetto ad eventi fissati dal delegato admin
+    # - Se viene fissato prima un evento da parte del delegato root e poi da parte del delegato admin e vanno i clash, lascio fissato quello del delegato root
+    # - Viceversa lascio fssati entrambi gli eventi
+    # - In caso di utenti paritari, quindi delegati root e delegati admin, in ogni caso lascio fissati entrambi gli eventi in clash
+
     if len(clashed_event) != 0:
         if clashed_event["calendar"] == event_calendar:
             print("Clash sullo stesso calendario", event_calendar)
             if owner["owner"] == clashed_event["creator"]:
                 return False
+
             delegate_new_event = Admin_Auth.find_one({"user_id": creator}, {"level": 1})
             delegate_old_event = Admin_Auth.find_one({"user_id": clashed_event["creator"]}, {"level": 1})
             if delegate_old_event["level"] == delegate_new_event["level"] or \
@@ -395,12 +416,12 @@ def isThereAConflict(event_calendar, start, end, creator):
                 return "F"
     return True
 
+# Servizio che permette l'inserimento di un evento, controllando sia clash, sia autorizzazioni
 @post('/insert_event')
 def insert_event():
-    # controllare se si tratta dell'owner o di un delegato; serve lo username dell'utente che vuole fare l'operazione
     query = get_query_new(request.body.read().decode('utf-8'))
-    # print(query)
     isOwner = Cal.find_one({"_id": ObjectId(query['calendar']), "owner": query["creator"]})
+    # L'owner del calendario può sempre inserire eventi sul suo calendario, senza limiti
     if isOwner is not None:
         Event.insert_one(query)
         myquery = {'_id': ObjectId(query['calendar'])}
@@ -409,10 +430,12 @@ def insert_event():
         Cal.update_one(myquery, newvalues)
         return "Inserimento completato con successo (owner del calendario)"
 
+    # Se non si tratta di owner, controlla che si tratti di un delegato
     existAuth = Admin_Auth.find_one({"user_id": query["creator"], "calendar_id": query["calendar"]})
     if existAuth is not None:
         isAble = canADelegateAccessTimeslot(query["creator"], query["calendar"], query["start"], query["end"])
         if isAble:
+            # canSet indica l'esito della valutazione del clash, dove T= no clash (o clash con inserimento concesso), EX indica clash su due calendari esclusivi e uso del colore per indicare il calsh
             canSet = isThereAConflict(query["calendar"], query["start"], query["end"], query["creator"])
             if canSet == "T":
                 Event.insert_one(query)
@@ -422,7 +445,7 @@ def insert_event():
                 Cal.update_one(myquery, newvalues)
                 return "Inserimento completato con successo (delegato e giusto intervallo)"
             elif canSet == "EX":
-                #setta il colore a strano
+                #setta il colore per indicare il clash
                 query["color"] ="#ff2400"
                 Event.insert_one(query)
                 myquery = {'_id': ObjectId(query['calendar'])}
@@ -437,7 +460,7 @@ def insert_event():
     return "Errore nell'inserimento"
 
 
-# curl --data "type=School&owner=Alex" http://0.0.0.0:12345/insert_cal
+# Servizio che permette l'inserimento di un nuovo calendario
 @post('/insert_cal')
 def insert_cal():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -446,7 +469,7 @@ def insert_cal():
     Cal.insert_one(new_dict)
     return "Inserimento del calendario avvenuto con successo"
 
-
+# Servizio che restituisce la lista di calendari di cui l'utente è owner
 @post('/list_cal_owner')
 def cal_owner():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -457,7 +480,8 @@ def cal_owner():
     return json_util.dumps(list_cal)
 
 
-# curl --data "name=Bob&Surname=Red" http://0.0.0.0:12345/insert_user
+# Servizio che permette l'inserimento di un nuovo utente e generazione della gerarchia ad esso associato
+# Server di login/register è diverso da questo, per cui, quando si logga con un nuovo utente per la prima volta, viene aggiunto il record del nuovo utente
 @post('/insert_user')
 def insert_user():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -478,14 +502,14 @@ def insert_user():
         query = {'owner': str(query["_id"])}
         Hier.update_one(query, update)
 
-
+# Funzione che permette di convertire la gerarchia di Graph in una immagine png e di salvarla con l'id dell'utente
 def save_image(G, id):
     pos = nx.spring_layout(G, seed=100)
     nx.draw(G, pos, with_labels=True, node_size=1500, font_size=10)
     plt.savefig(id + ".jpg")
     plt.close()
 
-
+# Servizio che permette di aggiungere un gruppo (precedentemente creato) alla gerarchia
 @post("/add_group_hier")
 def group_hier():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -496,7 +520,7 @@ def group_hier():
     G = getG(id)
     save_image(G, id)
 
-
+# Funzione che permette di generare la gerarchia associata ad un utente
 def getG(id):
     query = {'owner': id}
     hier = Hier.find_one(query, {"Hier": 1, "_id": 0})
@@ -506,7 +530,7 @@ def getG(id):
             G.add_edge(a["node"], a["belongsto"])
     return G
 
-
+# Servizio che permette l'inserimento di un nuovo gruppo
 @post('/insert_group')
 def insert_group():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -518,19 +542,13 @@ def insert_group():
     return "Impossibile inserire il gruppo"
 
 
-@post("/list_us")
-def list_us():
-    res = User.find({}, {"name": 1, "_id": 0})
-    return json_util.dumps(res)
-
-
-# curl --data "id=1&subject=Carol&calendar=School&type_event=Lezione&prop=null&type_auth=read&sign=+" http://0.0.0.0:12345/ins_auth
+#Servizio che permette l'inserimento di una autorizzazione di visibilità
 @post("/ins_auth")
 def insert_auth():
     query = get_query_new(request.body.read().decode('utf-8'))
-    print(query)
     myquery = {'_id': ObjectId(query['calendar_id'])}
     myquery2 = {'_id': ObjectId(query['group_id'])}
+    # Possibilità di inserire una auth anche per un delegato (si noti che un Delegato_ADMIN può inserire solo auth di tipo read)
     isDelegate = Admin_Auth.find_one({"user_id": query["creator"], "calendar_id": query["calendar_id"]})
     if isDelegate is not None:
         if isDelegate["level"] == "DELEGATO_ADMIN" and query["type_auth"] == "write":
@@ -546,7 +564,7 @@ def insert_auth():
     Cal.update_one(myquery, newvalues)
     return "Autorizzazione inserita con successo"
 
-
+# Servizio che restituisce tutti i calendari per cui un utente è delegato
 @post('/calendar_delegate')
 def calendar_delegate():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -557,12 +575,13 @@ def calendar_delegate():
         calend.append(cal)
     return json_util.dumps(calend)
 
-
+# Servizio che permette l'inserimento di una precondizione
 @post('/precondition')
 def insert_precondition():
     query = get_query_new(request.body.read().decode('utf-8'))
     myquery = {'_id': ObjectId(query['calendar_id'])}
     myquery1 = {'_id': ObjectId(query['group_id'])}
+    # Adattamento della query, alla precondizione, in modo da avere solo il campo timeslot
     if query['repetition'] == 'true':
         timeslot = query['startDay'] + "." + query['startHour'] + ":" + query['startMin'] + "-" + query[
             'endDay'] + "." + query['endHour'] + ":" + query['endMin']
@@ -589,7 +608,7 @@ def insert_precondition():
     Cal.update_one(myquery, newvalues)
     return "Precondizione inserita"
 
-
+# Servizio che permette l'inserimento di una auth amministrativa (concessione della delega)
 @post('/auth_admin')
 def insert_admin_auth():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -617,7 +636,7 @@ def insert_admin_auth():
     Cal.update_one(myquery, newvalues)
     return "Autorizzazione inserita con successo"
 
-
+# Servizio che restituisce tutti i gruppi creati da un determinato utente
 @post('/list_created_group')
 def list_group():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -629,7 +648,7 @@ def list_group():
         lista_group_id.append(item)
     return json_util.dumps(lista_group_id)
 
-
+# Servizio che permette di inserire un utente (se esiste) in un gruppo
 @post("/insert_user_group")
 def insert_user_group():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -648,17 +667,7 @@ def insert_user_group():
                 return "Gruppo inesistente"
     return "Utente inserito correttamente nel gruppo"
 
-
-# @post("/group_id")
-# def group_id():
-#     query = get_query_new(request.body.read().decode('utf-8'))
-#     lista = []
-#     res = Group.find({"name": query['name']}, {"_id": 1, "name": 1})
-#     for item in res:
-#         lista.append(str(item["_id"]) + "-" + item["name"])
-#     return lista
-
-
+# Funzione di utils che, dato il timeslot (in caso di ripetizione), estrae startDay, startHour, endDay e endHour
 def string_repetition(timeslot):
     minus_position = 0
     for item in re.finditer('-', timeslot):
@@ -669,7 +678,7 @@ def string_repetition(timeslot):
     end_hour = timeslot[minus_position + 3:len(timeslot)]
     return [start_day, start_hour, end_day, end_hour]
 
-
+# Funzione di utils che, dato il timeslot (in caso di non ripetizione), estrae startDate, startHour, endDate e endHour
 def string_not_repetition(timeslot):
     minus_position = 0
     for item in re.finditer('-', timeslot):
@@ -685,7 +694,8 @@ def string_not_repetition(timeslot):
     end_hour_param = datetime.time(end_date_pre)
     return [start_date_param, start_hour_param, end_date_param, end_hour_param]
 
-
+# Funzione di utilità per le autorizzazioni amministrative (delegato) che restituisce gli eventi che soddisfano il timeslot indicato dalla auth amministrativa (di tipo non ripetizione)
+# N.B. Vengono restuiti gli eventi che soddisfano il timeslot
 def evaluate_not_rep_admin(timeslot, events):
     [start_date, start_hour, end_date, end_hour] = string_not_repetition(timeslot)
     good_event = []
@@ -697,7 +707,8 @@ def evaluate_not_rep_admin(timeslot, events):
                 good_event.append(item)
     return good_event
 
-
+# Funzione di utilità per le autorizzazioni amministrative (delegato) che restituisce gli eventi che soddisfano il timeslot indicato dalla auth amministrativa (di tipo ripetizione)
+# N.B. Vengono restuiti gli eventi che soddisfano il timeslot
 def evaluate_rep_admin(timeslot, events):
     [start_day, start_hour, end_day, end_hour] = string_repetition(timeslot)
     good_event = []
@@ -711,12 +722,11 @@ def evaluate_rep_admin(timeslot, events):
                 good_event.append(item)
     return good_event
 
-
-# -------------------------------------------------------------------------------------------------------
+# Funzione di utilità per le precondizioni temporali che restituisce gli eventi che soddisfano il timeslot indicato dalla precondizione (di tipo non ripetizione)
+# N.B. Vengono restuiti gli eventi che non soddisfano il timeslot
 def evaluate_not_rep(timeslot, eventi):
     [start_date, start_hour, end_date, end_hour] = string_not_repetition(timeslot)
     good_event = []
-    # print(eventi)
     for item in eventi:
         start = datetime.fromtimestamp(int(item["start"]))
         end = datetime.fromtimestamp(int(item["end"]))
@@ -726,7 +736,8 @@ def evaluate_not_rep(timeslot, eventi):
             good_event.append(item)
     return good_event
 
-
+# Funzione di utilità per le precondizioni temporali che restituisce gli eventi che soddisfano il timeslot indicato dalla precondizione (di tipo ripetizione)
+# N.B. Vengono restuiti gli eventi che non soddisfano il timeslot
 def evaluate_rep(timeslot, eventi):
     [start_day, start_hour, end_day, end_hour] = string_repetition(timeslot)
     good_event = []
@@ -742,7 +753,7 @@ def evaluate_rep(timeslot, eventi):
             good_event.append(item)
     return good_event
 
-
+# Funzione di utilità che, data una auth il relativo calendario, restituisce gli eventi filtrati in base all'auth
 def authorization_filter(id_auth, calendario):
     eventi_good = []
     flag = False
@@ -757,10 +768,11 @@ def authorization_filter(id_auth, calendario):
     else:
         eventi = Event.find({'calendar': calendario})
 
+    # In caso di freeBusy, non restituire informazioni relative al titolo e ad ulteriori dettagli
     for item in eventi:
         if flag:
             item['title'] = "Slot non disponibile"
-
+    # Controlli in base al tipo di auth (any - tipo - evento)
         if auth["auth"] == "any":
             if auth['sign'] == '+':
                 eventi_good.append(item)
@@ -787,7 +799,7 @@ def authorization_filter(id_auth, calendario):
                     eventi_good.append(item)
     return eventi_good
 
-
+# Servizio che restituisce tutti gli eventi che un delegato può visualizzare (utilizzato nella creazione di auth da parte del delegato)
 @post("/events_delegate")
 def eventsCanView():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -795,7 +807,7 @@ def eventsCanView():
     if len(delegate_events) != 0:
         return json_util.dumps(delegate_events)
 
-
+# Servizio che restituisce tutti i tipi degli eventi che un delegato può visualizzare (utilizzato nella creazione di auth da parte del delegato)
 @post("/types_delegate")
 def eventsCanView():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -806,7 +818,7 @@ def eventsCanView():
             types.add(item["type"])
         return json_util.dumps(types)
 
-
+# Servizio che restituisce tutti i gruppi associati ad un calendario (utile per la creazione di auth)
 @post("/groups_delegate")
 def groups_delegate():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -816,10 +828,9 @@ def groups_delegate():
         group = Group.find_one({"_id": ObjectId(groups["group_id"])}, {"_id": 1, "name": 1})
         if not isInList(g, group, "_id", "_id"):
             g.append(group)
-    print(g)
     return json_util.dumps(g)
 
-
+# Funzione di wrapper che filtra gli eventi in base alle precondizioni esistenti
 def precond(pre, eventi, calendar):
     for i in pre:
         timeslot = Precondition.find_one({"_id": i, "calendar_id": calendar})
@@ -831,7 +842,7 @@ def precond(pre, eventi, calendar):
             return evaluate_not_rep(timeslot['timeslot'], eventi)
     return eventi
 
-
+# Funzione di wrapper che filtra gli eventi in base alle autorizzazioni amministrative esistenti
 def auth_adm(auth, query):
     for i in auth:
         timeslot = Admin_Auth.find_one({"_id": i},
@@ -842,7 +853,7 @@ def auth_adm(auth, query):
         else:
             return evaluate_not_rep_admin(timeslot['timeslot'], query['calendar'])
 
-
+# Funzione che, dato un utente, restituisce il suo id
 def user_to_group(user):
     res = Group.find({}, {"_id": 1, "User": 1})
     g = []
@@ -852,8 +863,8 @@ def user_to_group(user):
                 g.append(group['_id'])
     return g
 
-
-def solve_conflict(group_auth, calendar, type):
+# Funzione che filtra le autorizzazioni in base al tipo type (read, write o freeBusy)
+def filter_auth(group_auth, calendar, type):
     # Se esiste solo una auth, restituisci quella, altrimenti, risolvi conflitto
     if group_auth is None:
         return []
@@ -866,7 +877,6 @@ def solve_conflict(group_auth, calendar, type):
                     return group_auth
             if auth is not None:
                 return group_auth
-
         return []
     else:
         temp_list = []
@@ -887,7 +897,8 @@ def solve_conflict(group_auth, calendar, type):
             dict["Authorization"].append(item)
         return dict
 
-
+# Funzione che restituisce, dato utente e calendario, gli eventi visibili per quell'utente, considerando la sua posizione gerarchica e recuperando tutte le relative auth
+# function_scope indica se si stanno valutando auth di write o read
 def getVisibileEventsWithHier(user, calendar, function_scope):
     authorization_type_to_find = "write"
     if function_scope == "show":
@@ -909,14 +920,14 @@ def getVisibileEventsWithHier(user, calendar, function_scope):
         # salviamo le autorizzazioni del gruppo più vicino all'utente e risolviamo conflitti, se ne esistono
         auth_for_group = Group.find_one({"name": n, "creator": owner_Cal["owner"]},
                                         {"_id": 0, "Authorization": 1})
-        groups_auth.append((solve_conflict(auth_for_group, calendar, authorization_type_to_find)))
+        groups_auth.append((filter_auth(auth_for_group, calendar, authorization_type_to_find)))
         while n != "ANY":
             for node in G.successors(n):
                 n = node
                 # salviamo le autorizzazioni dei gruppi più alti in gerarchia e risolviamo conflitti, se ne esistono
                 auth_for_group = Group.find_one({"name": node, "creator": owner_Cal["owner"]},
                                                 {"_id": 0, "Authorization": 1})
-                groups_auth.append((solve_conflict(auth_for_group, calendar, authorization_type_to_find)))
+                groups_auth.append((filter_auth(auth_for_group, calendar, authorization_type_to_find)))
         no_event = True
 
     for item in groups_auth:
@@ -992,7 +1003,7 @@ def create_set_union(events):
                 list_events.append(temp_item)
     return list_events
 
-
+# Funzione che, dato un insieme di auth, valuta se hanno tutte il segno +, tutte - o misto
 def checkSign(auth):
     positive_sign = True
     negative_sign = True
@@ -1007,8 +1018,8 @@ def checkSign(auth):
     return [positive_sign, negative_sign]
 
 
-# Return the list of event, for the calendar CALENDAR that the user can update
-# Who calls this func, must check if the user is the creator of the event, in that case, he can update everything
+# Funzione che restituisce tutti gli eventi che un utente può scrivere (utilizzata nella modifica di un evento)
+# N.B. Si basa sulla funzione getVisibileEventsWithHier
 def eventUserCanWrite(user, calendar):
     user_group = user_to_group(user)
     events = getVisibileEventsWithHier(user, calendar, "update")
@@ -1025,6 +1036,7 @@ def eventUserCanWrite(user, calendar):
     else:
         return []
 
+# Funzione che sostituisce all'id del gruppo e del calendario il relativo nome
 def manipulateItem(item):
     item["group_id"] = Group.find_one({"_id": ObjectId(item["group_id"])}, {"_id": 0, "name": 1})["name"]
     item["calendar_id"] = Cal.find_one({"_id": ObjectId(item["calendar_id"])}, {"_id": 0, "type": 1})["type"]
@@ -1032,6 +1044,7 @@ def manipulateItem(item):
         item["condition"] = Event.find_one({"_id": ObjectId(item["condition"])}, {"_id": 0, "title": 1})["title"]
     return item
 
+# Servizio che fornisce la lista di tutte le autorizzazioni inserite dall'utente
 @post("/list_auth")
 def getAllAuth():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -1047,7 +1060,7 @@ def getAllAuth():
     return json_util.dumps(list_auth)
 
 
-# to update all references
+# Servizio che permette di cancellare una auth e aggiorna le relative referenze
 @post("/delete_auth")
 def deleteAuth():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -1065,7 +1078,7 @@ def deleteAuth():
         return "Errore nella cancellazione"
     return "Cancellazione completata con successo"
 
-
+# Servizio che fornisce la lista di tutte le precondizioni inserite dall'utente
 @post("/list_pre")
 def getAllPre():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -1077,7 +1090,7 @@ def getAllPre():
         list_pre.append(item)
     return json_util.dumps(list_pre)
 
-
+# Servizio che fornisce la lista di tutte le auth amministrative inserite dall'utente
 @post("/list_admin_pre")
 def getAllAdminPre():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -1089,7 +1102,7 @@ def getAllAdminPre():
         list_pre.append(item)
     return json_util.dumps(list_pre)
 
-
+# Servizio che fornisce la possibilità di cancellare le auth amministrative
 @post("/delete_admin_pre")
 def deleteAdminPre():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -1104,7 +1117,7 @@ def deleteAdminPre():
     return "Cancellazione completata con successo"
 
 
-# to update all references
+# Servizio che fornisce la possibilità di cancellare le precondizioni temporali
 @post("/delete_pre")
 def deletePre():
     query = get_query_new(request.body.read().decode('utf-8'))
@@ -1121,14 +1134,12 @@ def deletePre():
         return "Errore nella cancellazione"
     return "Cancellazione completata con successo"
 
-
+# Funzione che fornisce la lista degli eventi che un delegato può visualizzare
 def eventsADelegateCanRead(user_id, calendar_id):
-    # 1. Check, is he a Delegate?
     res = Admin_Auth.find_one({"user_id": user_id, "calendar_id": calendar_id})
     if res is None:
         print("Non si tratta di un delegato")
         return []
-    print("Hey, delegato, puoi vedere:")
     events = Event.find({"calendar": calendar_id})
     if events is None:
         print("Sei un delegato, ma non ci sono eventi su questo calendario")
@@ -1149,7 +1160,7 @@ def eventsADelegateCanRead(user_id, calendar_id):
     return list_events
 
 
-# In caso di delegato, aggiungere eventi che può vedere
+# Servizio che fornisce tutti gli eventi visibili su un determinato calendario
 @post("/event_vis")
 def vis():
     event_owner_cal = []
