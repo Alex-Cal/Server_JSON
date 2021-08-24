@@ -1,17 +1,12 @@
-import pymongo
 from bson import ObjectId
-
-myclient = pymongo.MongoClient("mongodb://localhost:27017/")
-mydb = myclient["CalendarDB"]
-Auth = mydb["Authorization"]
-Event = mydb["Events"]
+from Utility import Connections
 
 # Funzione che, dato un insieme di autorizzationi, un evento e un tipo di evento, restituisce True se, tra le auth,
 # ce n'è una di scrittura che si applica all'evento fornito (o al tipo fornito)
 def search_auth_write(auth, event_id, event_type):
     for a in auth:
         # conflitti
-        res = Auth.find_one({"_id": a[1], "type_auth": "write"})
+        res = Connections.getAuth().find_one({"_id": a[1], "type_auth": "write"})
         if res is None:
             return False
         if res["sign"] == "+":
@@ -29,16 +24,16 @@ def search_auth_write(auth, event_id, event_type):
 def authorization_filter(id_auth, calendario):
     eventi_good = []
     flag = False
-    auth = Auth.find_one({"_id": ObjectId(id_auth)},
+    auth = Connections.getAuth().find_one({"_id": ObjectId(id_auth)},
                          {'calendar_id': 1, 'condition': 1, 'sign': 1, "auth": 1, "type_auth": 1})
     if auth is None:
         return []
     if auth["type_auth"] == "freeBusy":
-        eventi = Event.find({'calendar': calendario},
+        eventi = Connections.getEvent().find({'calendar': calendario},
                             {"calendar": 1, "title": 1, "start": 1, "end": 1, "allDay": 1, "color": 1, "type": 1})
         flag = True
     else:
-        eventi = Event.find({'calendar': calendario})
+        eventi = Connections.getEvent().find({'calendar': calendario})
 
     # In caso di freeBusy, non restituire informazioni relative al titolo e ad ulteriori dettagli
     for item in eventi:
@@ -78,9 +73,9 @@ def filter_auth(group_auth, calendar, type):
         return []
     elif len(group_auth["Authorization"]) == 1:
         for a in group_auth["Authorization"]:
-            auth = Auth.find_one({"_id": a, "type_auth": type})
+            auth = Connections.getAuth().find_one({"_id": a, "type_auth": type})
             if type == "read":
-                auth_freeBusy = Auth.find_one({"_id": a, "type_auth": "freeBusy"})
+                auth_freeBusy = Connections.getAuth().find_one({"_id": a, "type_auth": "freeBusy"})
                 if auth_freeBusy is not None:
                     return group_auth
             if auth is not None:
@@ -89,12 +84,12 @@ def filter_auth(group_auth, calendar, type):
     else:
         temp_list = []
         for a in group_auth["Authorization"]:
-            auth = Auth.find_one({"_id": a, "type_auth": type})
+            auth = Connections.getAuth().find_one({"_id": a, "type_auth": type})
             if auth is not None:
                 temp_list.append(auth["_id"])
 
             if type == "read":
-                auth_freeBusy = Auth.find_one({"_id": a, "type_auth": "freeBusy"})
+                auth_freeBusy = Connections.getAuth().find_one({"_id": a, "type_auth": "freeBusy"})
                 if auth_freeBusy is not None:
                     temp_list.append(auth_freeBusy["_id"])
 
@@ -112,7 +107,7 @@ def checkSign(auth):
     first_positive_sign = "+"
     first_negative_sign = "-"
     for a in auth:
-        auth_ = Auth.find_one({"_id": a}, {"_id": 0, "sign": 1})
+        auth_ = Connections.getAuth().find_one({"_id": a}, {"_id": 0, "sign": 1})
         if auth_["sign"] != first_positive_sign:
             positive_sign = False
         if auth_["sign"] != first_negative_sign:

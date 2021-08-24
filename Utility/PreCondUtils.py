@@ -1,11 +1,6 @@
 from datetime import datetime
-import StringUtils
-import pymongo
+from Utility import StringUtils, Connections
 
-myclient = pymongo.MongoClient("mongodb://localhost:27017/")
-mydb = myclient["CalendarDB"]
-Precondition = mydb["Temporal Pre-Condition"]
-Admin_Auth = mydb["Admin_Auth"]
 
 # Funzione di utilità per le autorizzazioni amministrative (delegato) che restituisce gli eventi che soddisfano il
 # timeslot indicato dalla auth amministrativa (di tipo non ripetizione) N.B. Vengono restuiti gli eventi che
@@ -75,7 +70,7 @@ def evaluate_rep(timeslot, eventi):
 # Funzione di wrapper che filtra gli eventi in base alle precondizioni esistenti
 def precond(pre, eventi, calendar):
     for i in pre:
-        timeslot = Precondition.find_one({"_id": i, "calendar_id": calendar})
+        timeslot = Connections.getPrecondition().find_one({"_id": i, "calendar_id": calendar})
         if timeslot is None:
             return eventi
         if timeslot["repetition"] == "true":
@@ -87,7 +82,7 @@ def precond(pre, eventi, calendar):
 # Funzione di wrapper che filtra gli eventi in base alle autorizzazioni amministrative esistenti
 def auth_adm(auth, query):
     for i in auth:
-        timeslot = Admin_Auth.find_one({"_id": i},
+        timeslot = Connections.getAdmin_Auth().find_one({"_id": i},
                                        {"timeslot": 1, "_id": 0, "type_time": 1})
         if timeslot["type_time"] == "repetition":
             return evaluate_rep_admin(timeslot['timeslot'], query['calendar'])
@@ -98,7 +93,7 @@ def auth_adm(auth, query):
 # Funzione di utils che, fornito un utente, un calendario e un timeslot, restituisce True se l'utente può inserire in
 # quel determinato timeslot
 def canADelegateAccessTimeslot(user_id, calendar_id, start_time_to_insert, end_time_to_insert):
-    admin_pre = Admin_Auth.find_one({"user_id": user_id, "calendar_id": calendar_id})
+    admin_pre = Connections.getAdmin_Auth().find_one({"user_id": user_id, "calendar_id": calendar_id})
     if admin_pre is not None:
         start = datetime.fromtimestamp(int(start_time_to_insert))
         end = datetime.fromtimestamp(int(end_time_to_insert))

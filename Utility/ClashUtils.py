@@ -1,14 +1,6 @@
 from datetime import datetime
-
-
-import pymongo
 from bson import ObjectId
-
-myclient = pymongo.MongoClient("mongodb://localhost:27017/")
-mydb = myclient["CalendarDB"]
-Cal = mydb["Calendar"]
-Admin_Auth = mydb["Admin_Auth"]
-Event = mydb["Events"]
+from Utility import Connections
 
 
 # Funzione di utilità che, dati due timeslot, controlla che questi si sovrappongano (utilizzata per i clash)
@@ -27,15 +19,15 @@ def isConflict(start_a, end_a, start_b, end_b):
 
 # Funzione che verifica la presenza di clash, sia su stesso calendario, che su diverso calendario
 def isThereAConflict(event_calendar, start, end, creator):
-    owner = Cal.find_one({"_id": ObjectId(event_calendar)}, {"owner": 1, "_id": 0})
+    owner = Connections.getCal().find_one({"_id": ObjectId(event_calendar)}, {"owner": 1, "_id": 0})
     clashed_event = {}
     # Si analizzano tutti gli eventi e se ne cerca uno (se esiste) che vada in clash con quello che si vuole
     # inserire/modificare
     if owner is not None:
-        calendars = Cal.find({"owner": owner["owner"]})
+        calendars = Connections.getCal().find({"owner": owner["owner"]})
         for calendar in calendars:
             for event in calendar["Events"]:
-                event_to_check_with = Event.find_one({"_id": event})
+                event_to_check_with = Connections.getEvent().find_one({"_id": event})
                 if event_to_check_with is not None:
                     if isConflict(start, end, event_to_check_with["start"], event_to_check_with["end"]):
                         clashed_event = event_to_check_with
@@ -61,8 +53,8 @@ def isThereAConflict(event_calendar, start, end, creator):
             if owner["owner"] == clashed_event["creator"]:
                 return False
 
-            delegate_new_event = Admin_Auth.find_one({"user_id": creator}, {"level": 1})
-            delegate_old_event = Admin_Auth.find_one({"user_id": clashed_event["creator"]}, {"level": 1})
+            delegate_new_event = Connections.getAdmin_Auth().find_one({"user_id": creator}, {"level": 1})
+            delegate_old_event = Connections.getAdmin_Auth().find_one({"user_id": clashed_event["creator"]}, {"level": 1})
             if delegate_old_event["level"] == delegate_new_event["level"] or \
                     (delegate_new_event["level"] == "DELEGATO_ROOT" and delegate_old_event[
                         "level"] == "DELEGATO_ADMIN"):
@@ -70,14 +62,14 @@ def isThereAConflict(event_calendar, start, end, creator):
             if delegate_old_event["level"] == "DELEGATO_ROOT" and delegate_new_event["level"] == "DELEGATO_ADMIN":
                 return False
         else:
-            complete_event_calendar = Cal.find_one({"_id": ObjectId(event_calendar)})
-            complete_clash_event_calendar = Cal.find_one({"_id": ObjectId(clashed_event["calendar"])})
+            complete_event_calendar = Connections.getCal().find_one({"_id": ObjectId(event_calendar)})
+            complete_clash_event_calendar = Connections.getCal().find_one({"_id": ObjectId(clashed_event["calendar"])})
             print("Clash su calendari diversi", event_calendar, clashed_event["calendar"])
             if (complete_event_calendar["xor"] == "true" and complete_clash_event_calendar["xor"] == "false") or \
                     (complete_event_calendar["xor"] == "false" and complete_clash_event_calendar["xor"] == "false"):
                 return "T"
             if complete_event_calendar["xor"] == "true" and complete_clash_event_calendar["xor"] == "true":
-                Event.update_one({"_id": ObjectId(clashed_event["_id"])}, {"$set": {"color": "#ff2400"}})
+                Connections.getEvent().update_one({"_id": ObjectId(clashed_event["_id"])}, {"$set": {"color": "#ff2400"}})
                 return "EX"
             if complete_event_calendar["xor"] == "false" and complete_clash_event_calendar["xor"] == "true":
                 return "F"

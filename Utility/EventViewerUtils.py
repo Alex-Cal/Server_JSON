@@ -1,20 +1,5 @@
-import HierarchyUtils
-import AuthUtils
-
-import pymongo
+from Utility import HierarchyUtils, AuthUtils, PreCondUtils, Utils, Connections
 from bson import ObjectId
-
-# Connection to MongoDB
-import PreCondUtils
-import Utils
-
-myclient = pymongo.MongoClient("mongodb://localhost:27017/")
-mydb = myclient["CalendarDB"]
-Cal = mydb["Calendar"]
-Group = mydb["Group"]
-Event = mydb["Events"]
-Auth = mydb["Authorization"]
-Admin_Auth = mydb["Admin_Auth"]
 
 
 # Funzione che restituisce, dato utente e calendario, gli eventi visibili per quell'utente, considerando la sua
@@ -25,13 +10,13 @@ def getVisibileEventsWithHier(user, calendar, function_scope):
     if function_scope == "show":
         authorization_type_to_find = "read"
     # otteniamo proprietario del calendario e la sua relativa gerarchia
-    owner_Cal = Cal.find_one({"_id": ObjectId(calendar)}, {"_id": 0, "owner": 1})
+    owner_Cal = Connections.getCal().find_one({"_id": ObjectId(calendar)}, {"_id": 0, "owner": 1})
     G = HierarchyUtils.getG(owner_Cal["owner"])
     # otteniamo la lista dei gruppi a cui l'utente appartiene
     g_id = (Utils.user_to_group(user))
     group_name = []
     for group in g_id:
-        group_name.append(Group.find_one({"_id": group}, {"_id": 0, "name": 1}))
+        group_name.append(Connections.getGroup().find_one({"_id": group}, {"_id": 0, "name": 1}))
     groups_auth = []
     no_event = False
     for group in group_name:
@@ -39,14 +24,14 @@ def getVisibileEventsWithHier(user, calendar, function_scope):
         # ciclichiamo sul grafo alla ricerca di altre autorizzazioni, che verranno ereditate, partendo dal gruppo più
         # vicino all'utente
         # salviamo le autorizzazioni del gruppo più vicino all'utente e risolviamo conflitti, se ne esistono
-        auth_for_group = Group.find_one({"name": n, "creator": owner_Cal["owner"]},
+        auth_for_group = Connections.getGroup().find_one({"name": n, "creator": owner_Cal["owner"]},
                                         {"_id": 0, "Authorization": 1})
         groups_auth.append((AuthUtils.filter_auth(auth_for_group, calendar, authorization_type_to_find)))
         while n != "ANY":
             for node in G.successors(n):
                 n = node
                 # salviamo le autorizzazioni dei gruppi più alti in gerarchia e risolviamo conflitti, se ne esistono
-                auth_for_group = Group.find_one({"name": node, "creator": owner_Cal["owner"]},
+                auth_for_group = Connections.getGroup().find_one({"name": node, "creator": owner_Cal["owner"]},
                                                 {"_id": 0, "Authorization": 1})
                 groups_auth.append((AuthUtils.filter_auth(auth_for_group, calendar, authorization_type_to_find)))
         no_event = True
@@ -98,11 +83,11 @@ def eventUserCanWrite(user, calendar):
     result = []
     if len(events) != 0:
         if len(user_group) == 1:
-            result = Group.find_one({"_id": user_group[0]}, {"Precondition": 1, "_id": 0})
+            result = Connections.getGroup().find_one({"_id": user_group[0]}, {"Precondition": 1, "_id": 0})
             events = PreCondUtils.precond(result['Precondition'], events, calendar)
         else:
             for group in user_group:
-                result = Group.find_one({"_id": group}, {"Precondition": 1, "_id": 0})
+                result = Connections.getGroup().find_one({"_id": group}, {"Precondition": 1, "_id": 0})
                 events = PreCondUtils.precond(result['Precondition'], events, calendar)
         return events
     else:
@@ -111,11 +96,11 @@ def eventUserCanWrite(user, calendar):
 
 # Funzione che fornisce la lista degli eventi che un delegato può visualizzare
 def eventsADelegateCanRead(user_id, calendar_id):
-    res = Admin_Auth.find_one({"user_id": user_id, "calendar_id": calendar_id})
+    res = Connections.getAdmin_Auth().find_one({"user_id": user_id, "calendar_id": calendar_id})
     if res is None:
         print("Non si tratta di un delegato")
         return []
-    events = Event.find({"calendar": calendar_id})
+    events = Connections.getEvent().find({"calendar": calendar_id})
     if events is None:
         print("Sei un delegato, ma non ci sono eventi su questo calendario")
         return []
@@ -128,7 +113,7 @@ def eventsADelegateCanRead(user_id, calendar_id):
         timeslot = res["start"] + "-" + res["end"]
         list_events = PreCondUtils.evaluate_not_rep_admin(timeslot, events)
 
-    event_create_by_delegate = Event.find({"creator": user_id, "calendar": calendar_id})
+    event_create_by_delegate = Connections.getEvent().find({"creator": user_id, "calendar": calendar_id})
     for event in event_create_by_delegate:
         if not Utils.isInList(list_events, event, "_id", "_id"):
             list_events.append(event)

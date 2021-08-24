@@ -1,11 +1,6 @@
 import networkx as nx
 from matplotlib import pyplot as plt
-import pymongo
-
-myclient = pymongo.MongoClient("mongodb://localhost:27017/")
-mydb = myclient["CalendarDB"]
-Hier = mydb["Hier"]
-
+from Utility import Connections
 
 # Funzione che permette di convertire la gerarchia di Graph in una immagine png e di salvarla con l'id dell'utente
 def save_image(G, id):
@@ -18,7 +13,7 @@ def save_image(G, id):
 # Funzione che permette di generare la gerarchia associata ad un utente
 def getG(id):
     query = {'owner': id}
-    hier = Hier.find_one(query, {"Hier": 1, "_id": 0})
+    hier = Connections.getHier().find_one(query, {"Hier": 1, "_id": 0})
     G = nx.DiGraph()
     for a in hier["Hier"]:
         if a["belongsto"] != "":
