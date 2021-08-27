@@ -109,7 +109,7 @@ def update_events():
         if (query["start"] == eventToUpdate["start"] and query["end"] == eventToUpdate["end"]) or canUpdDateTime:
             if canUpdDateTime:
                 # Se la modifica del timeslot genera un clash, questo viene gestito e, di conseguenza, l'inserimento è funzionale all'esito del clash
-                if ClashUtils.isThereAConflict(query["calendar"], query["start"], query["end"], query["creator"]):
+                if ClashUtils.isThereAConflict(query["calendar"], query["start"], query["end"], query["creator"]) == "T":
                     Connections.getEvent().insert_one(query)
                     return "Evento modificato"
             # Se il timeslot non viene modificato, si inserisce il vecchio timeslot
