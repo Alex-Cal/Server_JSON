@@ -18,6 +18,8 @@ def isConflict(start_a, end_a, start_b, end_b):
 
 
 # Funzione che verifica la presenza di clash, sia su stesso calendario, che su diverso calendario
+# Il ritorno non è un semplice boolean, ma un carattere che finge da boolean, in quanto si ha la 
+# necessità di un terzo caso, diverso da True/False per indicare l'esclusività
 def isThereAConflict(event_calendar, start, end, creator):
     owner = Connections.getCal().find_one({"_id": ObjectId(event_calendar)}, {"owner": 1, "_id": 0})
     clashed_event = {}
