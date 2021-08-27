@@ -55,7 +55,7 @@ def cal_event():
         lista_event.append(item)
     return json_util.dumps(lista_event)
 
-
+# Servizio che permette la modifica di un evento precedentemente creato, tenendo conto del ruolo dell'utente rispetto all'evento creato
 @post('/mod_event')
 def update_events():
     query = StringUtils.get_query_new(request.body.read().decode('utf-8'))
