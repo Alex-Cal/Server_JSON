@@ -51,16 +51,16 @@ def isThereAConflict(event_calendar, start, end, creator):
         if clashed_event["calendar"] == event_calendar:
             print("Clash sullo stesso calendario", event_calendar)
             if owner["owner"] == clashed_event["creator"]:
-                return False
+                return "F"
 
             delegate_new_event = Connections.getAdmin_Auth().find_one({"user_id": creator}, {"level": 1})
             delegate_old_event = Connections.getAdmin_Auth().find_one({"user_id": clashed_event["creator"]}, {"level": 1})
             if delegate_old_event["level"] == delegate_new_event["level"] or \
                     (delegate_new_event["level"] == "DELEGATO_ROOT" and delegate_old_event[
                         "level"] == "DELEGATO_ADMIN"):
-                return True
+                return "T"
             if delegate_old_event["level"] == "DELEGATO_ROOT" and delegate_new_event["level"] == "DELEGATO_ADMIN":
-                return False
+                return "F"
         else:
             complete_event_calendar = Connections.getCal().find_one({"_id": ObjectId(event_calendar)})
             complete_clash_event_calendar = Connections.getCal().find_one({"_id": ObjectId(clashed_event["calendar"])})
@@ -73,4 +73,4 @@ def isThereAConflict(event_calendar, start, end, creator):
                 return "EX"
             if complete_event_calendar["xor"] == "false" and complete_clash_event_calendar["xor"] == "true":
                 return "F"
-    return True
+    return "T"
